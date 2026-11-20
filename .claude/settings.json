@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python -m src.:*)",
+      "Bash(git diff:*)",
+      "Bash(git status)"
+    ],
+    "deny": [
+      "Write(./data/raw/**)",
+      "Edit(./data/raw/**)",
+      "Bash(rm -rf:*)"
+    ]
+  }
+}
