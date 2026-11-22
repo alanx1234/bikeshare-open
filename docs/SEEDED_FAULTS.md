@@ -359,7 +359,7 @@ and `python -m src.features` gave `OK features: 714 rows, 15 features`.
 failed attempts. This time the hook, not a hand-run test, put the failure in
 front of the agent, at the moment of the edit.
 
-## Exercise 3: `shift(1)` removed from `cnt_roll_7`
+## Exercise 3 (fault 2): `shift(1)` removed from `cnt_roll_7`
 
 **Purpose:** a deliberately seeded leak. The 7-day rolling mean is made to
 include today's count, the value being predicted.
@@ -424,6 +424,10 @@ FAILED tests/test_leakage.py::test_rolling_mean_excludes_today - assert np.fl...
 
 ### Hook stderr
 
+> **Superseded:** see "Rerun with the hook registered" below for the
+> real automatic output. This hand-run capture used forward-slash paths
+> (see the correction at the end).
+
 **The hook again did not fire on its own**, because it is not registered in
 `.claude/settings.json` (see Exercise 2). This came from running
 `check_leakage.sh` by hand with a sample PostToolUse payload for
@@ -475,6 +479,110 @@ hand caught the leak, not the hook.
 **Not fixed, worth doing:** make `test_rolling_mean_excludes_today` check
 fixed dates and fail if a window is incomplete, as
 `test_rolling_std_excludes_today` does, instead of silently skipping.
+
+### Rerun with the hook registered (2026-11-21)
+
+The same fault was repeated with the hook registered and fixed for Windows
+paths, to capture what the hook really does during a normal edit.
+
+**Exact change** (`src/features.py`, `build_features()`, Edit tool):
+
+```diff
+-    out["cnt_roll_7"] = out[TARGET].shift(1).rolling(LAG_WARMUP).mean()
++    out["cnt_roll_7"] = out[TARGET].rolling(LAG_WARMUP).mean()  # SEEDED: shift(1) removed for hook capture
+```
+
+**Automatic hook output.** Nothing was run by hand. Claude Code ran the
+hook after the Edit and returned this with the Edit result, headed
+`PostToolUse:Edit hook blocking error from command: "bash
+"$CLAUDE_PROJECT_DIR/.claude/hooks/check_leakage.sh""`. It was copied from
+that message, because the hook's output never reaches a file.
+
+Encoding: pytest wrote `Â±` as the single Windows-1252 byte `0xB1`, and Claude
+Code decoded it as the replacement character `ï¿½` (U+FFFD, stored here as
+UTF-8). The text is recorded exactly as Claude Code displayed it.
+
+```text
+Leakage tests failed after editing c:/Users/caram/projects/bikeshare-open-starter/src/features.py:
+[714 rows x 29 columns]
+
+    def test_rolling_mean_excludes_today(feats):
+        """cnt_roll_7 must be the mean of the 7 calendar days *before* today."""
+        by_date = feats.set_index("dteday")[TARGET]
+        date = feats.dteday.iloc[200]
+        window = [date - pd.Timedelta(days=k) for k in range(1, 8)]
+        if all(d in by_date.index for d in window):
+            expected = sum(by_date[d] for d in window) / 7
+>           assert feats.set_index("dteday").cnt_roll_7[date] == pytest.approx(expected)
+E           assert np.float64(4389.0) == 4414.857142857143 ï¿½ 0.00441486
+E
+E             comparison failed
+E             Obtained: 4389.0
+E             Expected: 4414.857142857143 ï¿½ 0.00441486
+
+tests\test_leakage.py:57: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_leakage.py::test_rolling_mean_excludes_today - assert np.fl...
+1 failed, 8 passed in 0.65s
+```
+
+**Test failure.** Full suite, `python -m pytest tests/ -q`, exit code 1,
+written directly to a file by the run. The hook says `8 passed` because it
+runs `tests/test_leakage.py` only. The figures (4389.0 against 4414.857)
+match the original Exercise 3 run.
+
+Encoding: these bytes are as pytest wrote them, so each `Â±` here is a raw
+`0xB1` byte, not valid UTF-8. That is why this file is not valid UTF-8 (see
+the correction at the end).
+
+```text
+..........F.......                                                       [100%]
+================================== FAILURES ===================================
+______________________ test_rolling_mean_excludes_today _______________________
+
+feats =         dteday  instant  season  ...  cnt_lag_7   cnt_roll_7    cnt_std_7
+0   2011-01-10     10.0  WINTER  ...     134....428571   886.694316
+713 2012-12-31    731.0  WINTER  ...      920.0  1789.857143   887.135250
+
+[714 rows x 29 columns]
+
+    def test_rolling_mean_excludes_today(feats):
+        """cnt_roll_7 must be the mean of the 7 calendar days *before* today."""
+        by_date = feats.set_index("dteday")[TARGET]
+        date = feats.dteday.iloc[200]
+        window = [date - pd.Timedelta(days=k) for k in range(1, 8)]
+        if all(d in by_date.index for d in window):
+            expected = sum(by_date[d] for d in window) / 7
+>           assert feats.set_index("dteday").cnt_roll_7[date] == pytest.approx(expected)
+E           assert np.float64(4389.0) == 4414.857142857143 ± 0.00441486
+E             
+E             comparison failed
+E             Obtained: 4389.0
+E             Expected: 4414.857142857143 ± 0.00441486
+
+tests\test_leakage.py:57: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_leakage.py::test_rolling_mean_excludes_today - assert np.fl...
+1 failed, 17 passed in 1.58s
+```
+
+**Repair:** restored `shift(1)` with the Edit tool:
+
+```diff
+-    out["cnt_roll_7"] = out[TARGET].rolling(LAG_WARMUP).mean()  # SEEDED: shift(1) removed for hook capture
++    out["cnt_roll_7"] = out[TARGET].shift(1).rolling(LAG_WARMUP).mean()
+```
+
+The hook ran automatically on the repair edit too and passed silently (no
+blocking error). Then `python -m pytest tests/ -q` gave `18 passed in 1.44s`,
+and `python -m src.features` gave `OK features: 714 rows, 15 features`.
+
+**Turns to repair: 1.** One user turn ("Restore shift(1)"), one Edit, no
+failed attempts. The hook flagged the leak at the moment of the edit.
+
+**Still open:** only `test_rolling_mean_excludes_today` catches this leak, and
+it checks a single row inside an `if` that would skip silently if that
+row's window were incomplete.
 
 ## Exercise 4: unknown-weather-label exception removed
 
