@@ -4,7 +4,7 @@ import pytest
 from sklearn.metrics import r2_score
 
 from src.config import FORBIDDEN, LAG_WARMUP, RAW, RAW_FEATURE_COLS, TARGET
-from src.features import build_features, feature_columns, reindex_to_calendar
+from src.features import build_features, encode_weather, feature_columns, reindex_to_calendar
 from src.ingest import load_raw
 from src.train import MODELS, temporal_split
 
@@ -33,6 +33,15 @@ def test_every_raw_column_is_classified():
     assert not unclassified, (
         f"raw columns not classified in src/config.py: {sorted(unclassified)}"
     )
+
+
+def test_unknown_weather_label_raises():
+    """An unmapped label must raise, not become NaN that dropna() deletes
+    silently. NaN itself (the reindexed missing day) is allowed through."""
+    ok = encode_weather(pd.Series(["GOOD", "MISTY", "BAD", None]))
+    assert ok.iloc[:3].tolist() == [0.0, 1.0, 2.0]
+    with pytest.raises(ValueError, match="unmapped weather labels"):
+        encode_weather(pd.Series(["GOOD", "Bad"]))
 
 
 def test_calendar_is_complete_before_lagging(raw):
