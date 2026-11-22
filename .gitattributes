@@ -1,0 +1,8 @@
+# Shell scripts must keep LF endings. With core.autocrlf=true, a Windows
+# checkout would otherwise write CRLF, and bash fails on the stray \r
+# (e.g. `set: pipefail\r: invalid option`), silently breaking the hook.
+*.sh text eol=lf
+
+# The raw dataset is stored byte-for-byte: no line-ending conversion, so its
+# SHA-256 is the same on every checkout and on every OS.
+data/raw/*.csv -text

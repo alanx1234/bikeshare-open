@@ -3,6 +3,10 @@
 Tests that were written to fail before the code they check existed, with
 the exact output of that failing run and why it failed.
 
+> **Read the correction at the end before relying on any "Hook stderr"
+> section below.** The hand-run hook results in Exercises 2-4 overstate what
+> the hook would have done on Windows.
+
 ## `cnt_std_7`: rolling 7-day standard deviation of demand
 
 **Test:** `tests/test_leakage.py::test_rolling_std_excludes_today`,
@@ -477,3 +481,39 @@ one run confirming it fails, one Edit restoring the check, one verification
 run, no failed attempts. Unlike Exercises 2 and 3, the existing suite gave no
 signal. The fault was known only because it was seeded, so the repair had to
 include writing the test that detects it.
+
+## Correction (2026-11-21): the hand-run hook results
+
+The "Hook stderr" sections in Exercises 2, 3 and 4 came from running
+`.claude/hooks/check_leakage.sh` by hand, with a sample payload whose
+`file_path` used **forward slashes** (`c:/Users/.../src/features.py`). That
+does not match what the hook would have received or done at the time:
+
+- **Claude Code sends Windows paths with backslashes**
+  (`c:\Users\...\src\features.py`). The script matched only `*src/*.py`, so
+  on this machine it would have exited 0 on every edit and run no tests. The
+  leaks in Exercises 2 and 3 would have gone through without a word.
+- **The script called `python3`.** That worked here, but on many Windows
+  machines `python3` is the Microsoft Store placeholder, which would make
+  the payload read fail. The old script would then also exit 0 silently.
+- **The hook was not registered at all**, as each exercise says, so it could
+  not fire whatever the path.
+
+The recorded stderr is still an accurate picture of the test failure the
+hook passes on. It is not evidence that the hook worked.
+
+**What changed:**
+- `check_leakage.sh` converts backslashes to `/` before matching
+  `*/src/*.py`, calls `python`, and exits 2 with a message if it cannot read
+  the payload or `cd` into the project, instead of passing silently.
+- `.claude/settings.json` registers it as a `PostToolUse` hook on
+  `Edit|Write|MultiEdit`.
+- `.gitattributes` pins `*.sh` to LF, so a Windows checkout cannot break the
+  script with CRLF endings.
+
+**Verified live:** with the fix in place, a normal Edit that reintroduced
+the Exercise 2 leak (`+ ["casual"]` in `feature_columns()`) brought the
+hook's stderr back automatically as a `PostToolUse:Edit hook blocking
+error`, with the same `test_no_forbidden_features` failure recorded in
+Exercise 2 (`1 failed, 8 passed`). The leak was reverted at once, and that
+edit also ran the hook, which passed silently.

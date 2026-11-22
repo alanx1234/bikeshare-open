@@ -10,15 +10,25 @@
 set -uo pipefail
 
 payload=$(cat)
-path=$(printf '%s' "$payload" | python3 -c \
-  'import json,sys; print(json.load(sys.stdin).get("tool_input",{}).get("file_path",""))')
+# `python`, not `python3`: on Windows `python3` is often the Microsoft Store
+# stub. Backslashes become forward slashes so Windows paths such as
+# c:\...\src\features.py match the pattern below; without this the hook
+# skipped every edit on Windows without a word.
+if ! path=$(printf '%s' "$payload" | python -c \
+  'import json,sys; print(json.load(sys.stdin).get("tool_input",{}).get("file_path","").replace("\\","/"))'); then
+  echo "check_leakage hook: could not parse the hook payload with python" >&2
+  exit 2
+fi
 
 case "$path" in
-  *src/*.py) ;;
+  */src/*.py) ;;
   *) exit 0 ;;
 esac
 
-cd "${CLAUDE_PROJECT_DIR:-.}" || exit 0
+if ! cd "${CLAUDE_PROJECT_DIR:-.}"; then
+  echo "check_leakage hook: cannot cd to project dir '${CLAUDE_PROJECT_DIR:-.}'" >&2
+  exit 2
+fi
 if ! out=$(python -m pytest tests/test_leakage.py -q 2>&1); then
   echo "Leakage tests failed after editing $path:" >&2
   echo "$out" | tail -20 >&2
