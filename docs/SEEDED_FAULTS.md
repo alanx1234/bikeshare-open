@@ -584,7 +584,7 @@ failed attempts. The hook flagged the leak at the moment of the edit.
 it checks a single row inside an `if` that would skip silently if that
 row's window were incomplete.
 
-## Exercise 4: unknown-weather-label exception removed
+## Exercise 4 (fault 3): unknown-weather-label exception removed
 
 **Purpose:** a deliberately seeded fault. `encode_weather` stops failing
 loudly on labels outside GOOD / MISTY / BAD.
@@ -627,6 +627,9 @@ Command: `python -m pytest tests/ -q`. **Exit code 0: nothing failed.**
 ```
 
 ### Hook stderr
+
+> **Superseded:** see "Rerun with the hook registered" below. The
+> registered hook was also silent, but for a different reason.
 
 **Empty (0 bytes), exit code 0.** It was run by hand with a sample
 PostToolUse payload for `src/features.py`, because the hook is not
@@ -684,6 +687,82 @@ one run confirming it fails, one Edit restoring the check, one verification
 run, no failed attempts. Unlike Exercises 2 and 3, the existing suite gave no
 signal. The fault was known only because it was seeded, so the repair had to
 include writing the test that detects it.
+
+### Rerun with the hook registered (2026-11-21)
+
+The same fault was repeated with the hook registered and fixed for Windows
+paths. By now `test_unknown_weather_label_raises` existed (it was added in
+the first repair above), so the full suite could catch the fault.
+
+**Exact change** (`src/features.py`, `encode_weather()`, Edit tool):
+
+```diff
+-    known = series.dropna()
+-    unknown = set(known.unique()) - set(WEATHER_ORDER)
+-    if unknown:
+-        raise ValueError(f"unmapped weather labels: {sorted(unknown)}")
++    # SEEDED: unknown-label check removed for hook capture
+     return series.map(WEATHER_ORDER).astype(float)
+```
+
+**Automatic hook output: none.** The Edit returned with no hook message.
+Silence looks the same whether the hook passed or never ran, so the same
+Windows-path payload was replayed through Git Bash, the way Claude Code runs
+hooks:
+
+- exit code 0, stderr empty (0 bytes)
+- the `-x` trace shows it ran `python -m pytest tests/test_leakage.py`, giving
+  `9 passed`
+
+**So the hook ran and passed.** The test that catches this fault is in
+`tests/test_contract.py`, and the hook runs only `tests/test_leakage.py`. Unlike
+faults 1 and 2, the hook did not flag this fault at the moment of the edit.
+
+**Test failure.** Full suite, `python -m pytest tests/ -q`, exit code 1,
+written directly to a file by the run:
+
+```text
+.F................                                                       [100%]
+================================== FAILURES ===================================
+______________________ test_unknown_weather_label_raises ______________________
+
+    def test_unknown_weather_label_raises():
+        """An unmapped label must raise, not become NaN that dropna() deletes
+        silently. NaN itself (the reindexed missing day) is allowed through."""
+        ok = encode_weather(pd.Series(["GOOD", "MISTY", "BAD", None]))
+        assert ok.iloc[:3].tolist() == [0.0, 1.0, 2.0]
+>       with pytest.raises(ValueError, match="unmapped weather labels"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests\test_contract.py:43: Failed
+=========================== short test summary info ===========================
+FAILED tests/test_contract.py::test_unknown_weather_label_raises - Failed: DI...
+1 failed, 17 passed in 1.66s
+```
+
+**Repair:** restored the check with the Edit tool:
+
+```diff
+-    # SEEDED: unknown-label check removed for hook capture
++    known = series.dropna()
++    unknown = set(known.unique()) - set(WEATHER_ORDER)
++    if unknown:
++        raise ValueError(f"unmapped weather labels: {sorted(unknown)}")
+     return series.map(WEATHER_ORDER).astype(float)
+```
+
+The hook ran on the repair edit and passed silently. Then
+`python -m pytest tests/ -q` gave `18 passed in 1.50s`, and
+`python -m src.features` gave `OK features: 714 rows, 15 features`.
+
+**Turns to repair: 1.** One user turn ("Restore the exception"), one Edit,
+no failed attempts. The fault was found by the full suite run by hand, not
+by the hook.
+
+**Still open:** the hook does not cover this fault. Either have the hook run
+all of `tests/` (about 1.7s per edit instead of about 0.7s), or move
+`test_unknown_weather_label_raises` into `tests/test_leakage.py`.
 
 ## Correction (2026-11-21): the hand-run hook results
 
