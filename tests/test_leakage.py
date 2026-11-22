@@ -57,6 +57,21 @@ def test_rolling_mean_excludes_today(feats):
         assert feats.set_index("dteday").cnt_roll_7[date] == pytest.approx(expected)
 
 
+@pytest.mark.parametrize("date", ["2011-06-15", "2011-03-18"])
+def test_rolling_std_excludes_today(feats, date):
+    """cnt_std_7 must be the sample std (ddof=1) of the 7 calendar days
+    *before* today. 2011-03-18 is the first row whose window sits right
+    after the missing 2011-03-10, so a row-based window would be wrong.
+    Window counts come from the raw data: dropna removes the rows right
+    after the gap from `feats`, but their counts are real."""
+    by_date = load_raw().set_index("dteday")[TARGET]
+    date = pd.Timestamp(date)
+    window = [date - pd.Timedelta(days=k) for k in range(1, 8)]
+    assert all(d in by_date.index for d in window), "window must be complete"
+    expected = pd.Series([by_date[d] for d in window]).std(ddof=1)
+    assert feats.set_index("dteday").cnt_std_7[date] == pytest.approx(expected)
+
+
 def test_no_missing_values(feats):
     assert feats[feature_columns(feats)].isna().sum().sum() == 0
 
