@@ -376,3 +376,104 @@ hand caught the leak, not the hook.
 **Not fixed, worth doing:** make `test_rolling_mean_excludes_today` check
 fixed dates and fail if a window is incomplete, as
 `test_rolling_std_excludes_today` does, instead of silently skipping.
+
+## Exercise 4: unknown-weather-label exception removed
+
+**Purpose:** a deliberately seeded fault. `encode_weather` stops failing
+loudly on labels outside GOOD / MISTY / BAD.
+
+### Exact change
+
+`src/features.py`, in `encode_weather()`, made with the Edit tool:
+
+```diff
+-    known = series.dropna()
+-    unknown = set(known.unique()) - set(WEATHER_ORDER)
+-    if unknown:
+-        raise ValueError(f"unmapped weather labels: {sorted(unknown)}")
++    # EXERCISE 4: unknown-label check removed
+     return series.map(WEATHER_ORDER).astype(float)
+```
+
+### Why nothing failed
+
+**No test caught this fault.** The raw file has only the three known labels
+(GOOD 463, MISTY 245, BAD 20), so the code with the check and without it
+produce identical output, and no test in `tests/` gave `encode_weather` an
+unknown label.
+
+What the fault does, shown in memory without touching the raw file: with the
+20 BAD days relabelled `"Bad"` (as an upstream casing change might do),
+`.map()` turns them into NaN and `dropna()` deletes them. 714 rows become
+694, with 0 BAD-weather days left, and no error.
+`test_only_expected_rows_are_dropped` would catch that (34 rows lost against
+an allowed 14), but only once the real raw file had a bad label, and it would
+point at row loss rather than weather.
+
+### Test output with the fault in place
+
+Command: `python -m pytest tests/ -q`. **Exit code 0: nothing failed.**
+
+```text
+.................                                                        [100%]
+17 passed in 1.61s
+```
+
+### Hook stderr
+
+**Empty (0 bytes), exit code 0.** It was run by hand with a sample
+PostToolUse payload for `src/features.py`, because the hook is not
+registered (see Exercise 2). Even if it were, it would have let this edit
+through without comment.
+
+### Repair
+
+**Step 1, regression test first.** Added `test_unknown_weather_label_raises`
+to `tests/test_contract.py`. It checks that known labels encode to 0/1/2
+with NaN allowed through, and that `encode_weather(pd.Series(["GOOD", "Bad"]))`
+raises `ValueError`. Run against the faulty code, it fails for the right
+reason. This is the failing output the suite could not produce before
+(`python -m pytest tests/ -q`, exit code 1):
+
+```text
+.F................                                                       [100%]
+================================== FAILURES ===================================
+______________________ test_unknown_weather_label_raises ______________________
+
+    def test_unknown_weather_label_raises():
+        """An unmapped label must raise, not become NaN that dropna() deletes
+        silently. NaN itself (the reindexed missing day) is allowed through."""
+        ok = encode_weather(pd.Series(["GOOD", "MISTY", "BAD", None]))
+        assert ok.iloc[:3].tolist() == [0.0, 1.0, 2.0]
+>       with pytest.raises(ValueError, match="unmapped weather labels"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests\test_contract.py:43: Failed
+=========================== short test summary info ===========================
+FAILED tests/test_contract.py::test_unknown_weather_label_raises - Failed: DI...
+1 failed, 17 passed in 1.69s
+```
+
+**Step 2, fix.** Restored the check with the Edit tool:
+
+```diff
+-    # EXERCISE 4: unknown-label check removed
++    known = series.dropna()
++    unknown = set(known.unique()) - set(WEATHER_ORDER)
++    if unknown:
++        raise ValueError(f"unmapped weather labels: {sorted(unknown)}")
+     return series.map(WEATHER_ORDER).astype(float)
+```
+
+**Verification:**
+- `python -m pytest tests/ -q`: `18 passed in 1.50s` (17 before, plus the
+  new regression test)
+- the hook, run by hand: exit code 0, no stderr
+- `python -m src.features`: `OK features: 714 rows, 15 features`
+
+**Turns to repair: 1.** One user turn ("fix the fault"): one test added,
+one run confirming it fails, one Edit restoring the check, one verification
+run, no failed attempts. Unlike Exercises 2 and 3, the existing suite gave no
+signal. The fault was known only because it was seeded, so the repair had to
+include writing the test that detects it.
