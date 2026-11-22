@@ -22,7 +22,7 @@ DATA_URL = (
 
 TARGET = "cnt"
 
-# --- Three reasons a column is kept out of the feature set --------------
+# --- Four reasons a column is kept out of the feature set ---------------
 
 # 1. Leakage: the target or an arithmetic restatement of it.
 #    casual + registered == cnt exactly, on every row. A model handed these
@@ -42,8 +42,27 @@ TIME_INDEX_COLS = {"instant", "yr", "days_since_2011"}
 #    build our own lags from the target and test those instead.
 UNVERIFIED_COLS = {"cnt_2d_bfr"}
 
+# 4. Redundant calendar: NOT leakage -- each is known in advance from the
+#    date. They are text restatements of `dteday` (season and month names,
+#    weekday abbreviations), and src/features.py already derives the same
+#    information from `dteday` as dayofweek, month_sin and month_cos.
+#    Listing them here records that they are excluded on purpose, rather
+#    than dropped silently because they are not numeric.
+REDUNDANT_CALENDAR_COLS = {"season", "mnth", "weekday"}
+
 # What feature_columns() and the tests actually enforce.
-FORBIDDEN = LEAKAGE_COLS | TIME_INDEX_COLS | UNVERIFIED_COLS
+FORBIDDEN = LEAKAGE_COLS | TIME_INDEX_COLS | UNVERIFIED_COLS | REDUNDANT_CALENDAR_COLS
+
+# Raw columns the model may draw on: used directly (the numeric weather
+# readings) or encoded into a feature in src/features.py (holiday, workday,
+# weather). This is a classification of raw inputs, not the feature list:
+# feature_columns() still derives that from FORBIDDEN. tests/test_contract.py
+# fails if any raw CSV column is in neither set (and is not `dteday`), so a
+# column added upstream cannot slip into, or out of, the model unreviewed.
+RAW_FEATURE_COLS = {
+    "temp", "atemp", "hum", "windspeed",
+    "holiday", "workday", "weather",
+}
 
 # Temporal split: train on 2011, validate on H1 2012, test on H2 2012.
 TRAIN_END = "2011-12-31"

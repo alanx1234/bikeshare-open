@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 from sklearn.metrics import r2_score
 
-from src.config import LAG_WARMUP, TARGET
+from src.config import FORBIDDEN, LAG_WARMUP, RAW, RAW_FEATURE_COLS, TARGET
 from src.features import build_features, feature_columns, reindex_to_calendar
 from src.ingest import load_raw
 from src.train import MODELS, temporal_split
@@ -17,6 +17,22 @@ def raw():
 @pytest.fixture(scope="module")
 def feats(raw):
     return build_features(raw)
+
+
+def test_every_raw_column_is_classified():
+    """Every column in the raw CSV must be forbidden, a feature input, or
+    `dteday`. feature_columns() works by exclusion, so an unclassified
+    numeric column becomes a feature silently and an unclassified text
+    column is dropped silently. Reads the CSV header itself, not load_raw(),
+    so nothing upstream can hide a column."""
+    assert not (FORBIDDEN & RAW_FEATURE_COLS), (
+        f"classified as both forbidden and feature: {sorted(FORBIDDEN & RAW_FEATURE_COLS)}"
+    )
+    header = set(pd.read_csv(RAW, nrows=0).columns)
+    unclassified = header - FORBIDDEN - RAW_FEATURE_COLS - {"dteday"}
+    assert not unclassified, (
+        f"raw columns not classified in src/config.py: {sorted(unclassified)}"
+    )
 
 
 def test_calendar_is_complete_before_lagging(raw):
