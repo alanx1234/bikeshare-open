@@ -4,10 +4,13 @@ test_no_forbidden_features is the single most valuable test in this repo:
 casual + registered == cnt exactly, so any model handed those columns
 scores R^2 = 1.0 and looks brilliant while having learned nothing.
 """
+import csv
+import datetime
+
 import pandas as pd
 import pytest
 
-from src.config import FORBIDDEN, TARGET
+from src.config import FORBIDDEN, RAW, TARGET
 from src.features import build_features, feature_columns
 from src.ingest import load_raw
 
@@ -47,14 +50,39 @@ def test_lag_is_not_the_target(feats):
     assert not (feats.cnt_lag_1 == feats[TARGET]).all()
 
 
-def test_rolling_mean_excludes_today(feats):
-    """cnt_roll_7 must be the mean of the 7 calendar days *before* today."""
-    by_date = feats.set_index("dteday")[TARGET]
-    date = feats.dteday.iloc[200]
-    window = [date - pd.Timedelta(days=k) for k in range(1, 8)]
-    if all(d in by_date.index for d in window):
-        expected = sum(by_date[d] for d in window) / 7
-        assert feats.set_index("dteday").cnt_roll_7[date] == pytest.approx(expected)
+def _raw_counts_by_date() -> dict[str, int]:
+    """cnt by ISO date, read with the csv module straight from the raw file,
+    so the expected values do not depend on load_raw(), pandas rolling, or
+    build_features() -- the code under test."""
+    with open(RAW, newline="") as fh:
+        return {row["dteday"]: int(row[TARGET]) for row in csv.DictReader(fh)}
+
+
+# Each date is chosen for a reason; the reason is printed on failure.
+ROLLING_MEAN_DATES = {
+    "2011-01-10": "first modelled day: its window is the first 7 rows of the file",
+    "2011-03-18": "first day whose window sits right after the missing 2011-03-10",
+    "2011-06-15": "ordinary mid-year day",
+    "2012-01-01": "window crosses the year boundary from train into validation",
+    "2012-03-01": "window includes the leap day 2012-02-29",
+    "2012-10-30": "window includes Hurricane Sandy (2012-10-29, 22 rides)",
+}
+
+
+@pytest.mark.parametrize("date", sorted(ROLLING_MEAN_DATES))
+def test_rolling_mean_excludes_today(feats, date):
+    """cnt_roll_7 on date d must be the plain mean of cnt on d-7 .. d-1, in
+    calendar days. Fails, rather than skips, if a window is incomplete."""
+    counts = _raw_counts_by_date()
+    day = datetime.date.fromisoformat(date)
+    window = [(day - datetime.timedelta(days=k)).isoformat() for k in range(1, 8)]
+    missing = [d for d in window if d not in counts]
+    assert not missing, f"{date}: window incomplete, missing {missing}"
+    expected = sum(counts[d] for d in window) / 7
+
+    got = feats.set_index("dteday").cnt_roll_7.get(pd.Timestamp(date))
+    assert got is not None, f"{date} is not in the feature table"
+    assert got == pytest.approx(expected), f"{date}: {ROLLING_MEAN_DATES[date]}"
 
 
 @pytest.mark.parametrize("date", ["2011-06-15", "2011-03-18"])

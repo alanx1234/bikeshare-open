@@ -388,8 +388,9 @@ other test noticed: the other 16 passed, including the row-count contract.
 
 ### Failing test output
 
-Command: `python -m pytest tests/ -q`. Exit code 1. The `�` is pytest's `±`,
-mangled by the Windows console encoding, as captured.
+Command: `python -m pytest tests/ -q`. Exit code 1. pytest wrote each `±`
+as the Windows-1252 byte `0xB1`; it is stored here as UTF-8 `±` (see
+"Encoding conversion" at the end).
 
 ```text
 .........F.......                                                        [100%]
@@ -410,11 +411,11 @@ feats =         dteday  instant  season  ...  cnt_lag_7   cnt_roll_7    cnt_std_
         if all(d in by_date.index for d in window):
             expected = sum(by_date[d] for d in window) / 7
 >           assert feats.set_index("dteday").cnt_roll_7[date] == pytest.approx(expected)
-E           assert np.float64(4389.0) == 4414.857142857143 � 0.00441486
+E           assert np.float64(4389.0) == 4414.857142857143 ± 0.00441486
 E             
 E             comparison failed
 E             Obtained: 4389.0
-E             Expected: 4414.857142857143 � 0.00441486
+E             Expected: 4414.857142857143 ± 0.00441486
 
 tests\test_leakage.py:57: AssertionError
 =========================== short test summary info ===========================
@@ -446,11 +447,11 @@ Leakage tests failed after editing c:/Users/caram/projects/bikeshare-open-starte
         if all(d in by_date.index for d in window):
             expected = sum(by_date[d] for d in window) / 7
 >           assert feats.set_index("dteday").cnt_roll_7[date] == pytest.approx(expected)
-E           assert np.float64(4389.0) == 4414.857142857143 � 0.00441486
+E           assert np.float64(4389.0) == 4414.857142857143 ± 0.00441486
 E             
 E             comparison failed
 E             Obtained: 4389.0
-E             Expected: 4414.857142857143 � 0.00441486
+E             Expected: 4414.857142857143 ± 0.00441486
 
 tests\test_leakage.py:57: AssertionError
 =========================== short test summary info ===========================
@@ -531,9 +532,9 @@ written directly to a file by the run. The hook says `8 passed` because it
 runs `tests/test_leakage.py` only. The figures (4389.0 against 4414.857)
 match the original Exercise 3 run.
 
-Encoding: these bytes are as pytest wrote them, so each `±` here is a raw
-`0xB1` byte, not valid UTF-8. That is why this file is not valid UTF-8 (see
-the correction at the end).
+Encoding: pytest wrote each `±` here as the Windows-1252 byte `0xB1`; it is
+stored as UTF-8 `±` (see "Encoding conversion" at the end). The text is
+otherwise as pytest wrote it.
 
 ```text
 ..........F.......                                                       [100%]
@@ -554,11 +555,11 @@ feats =         dteday  instant  season  ...  cnt_lag_7   cnt_roll_7    cnt_std_
         if all(d in by_date.index for d in window):
             expected = sum(by_date[d] for d in window) / 7
 >           assert feats.set_index("dteday").cnt_roll_7[date] == pytest.approx(expected)
-E           assert np.float64(4389.0) == 4414.857142857143 � 0.00441486
+E           assert np.float64(4389.0) == 4414.857142857143 ± 0.00441486
 E             
 E             comparison failed
 E             Obtained: 4389.0
-E             Expected: 4414.857142857143 � 0.00441486
+E             Expected: 4414.857142857143 ± 0.00441486
 
 tests\test_leakage.py:57: AssertionError
 =========================== short test summary info ===========================
@@ -763,6 +764,62 @@ by the hook.
 **Still open:** the hook does not cover this fault. Either have the hook run
 all of `tests/` (about 1.7s per edit instead of about 0.7s), or move
 `test_unknown_weather_label_raises` into `tests/test_leakage.py`.
+(Closed below: the hook now runs all of `tests/`.)
+
+### Rerun with the hook running the full suite (2026-11-21)
+
+`.claude/hooks/check_leakage.sh` was changed to run `python -m pytest tests/ -q`
+instead of `tests/test_leakage.py` only, and its message now says "Tests
+failed" rather than "Leakage tests failed". The suite had grown to 23 tests:
+`test_rolling_mean_excludes_today` became six named dates. Then the fault
+was repeated.
+
+**Exact change:** identical to the rerun above (the four check lines
+replaced by `# SEEDED: unknown-label check removed for hook capture`), made
+with the Edit tool.
+
+**Automatic hook output.** Nothing was run by hand. Claude Code ran the
+hook after the Edit and returned this with the Edit result, headed
+`PostToolUse:Edit hook blocking error from command: "bash
+"$CLAUDE_PROJECT_DIR/.claude/hooks/check_leakage.sh""`. It was copied from
+that message, because the hook's output never reaches a file.
+
+```text
+Tests failed after editing c:/Users/caram/projects/bikeshare-open-starter/src/features.py:
+.F.....................                                                  [100%]
+================================== FAILURES ===================================
+______________________ test_unknown_weather_label_raises ______________________
+
+    def test_unknown_weather_label_raises():
+        """An unmapped label must raise, not become NaN that dropna() deletes
+        silently. NaN itself (the reindexed missing day) is allowed through."""
+        ok = encode_weather(pd.Series(["GOOD", "MISTY", "BAD", None]))
+        assert ok.iloc[:3].tolist() == [0.0, 1.0, 2.0]
+>       with pytest.raises(ValueError, match="unmapped weather labels"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+tests\test_contract.py:43: Failed
+=========================== short test summary info ===========================
+FAILED tests/test_contract.py::test_unknown_weather_label_raises - Failed: DI...
+1 failed, 22 passed in 1.59s
+```
+
+**This time the hook flagged fault 3 at the moment of the edit,** where the
+leakage-only hook had passed it. Because the hook now runs the full suite,
+its output is the complete pytest result; there is no separate count to
+reconcile.
+
+**Repair:** restored the four check lines with the Edit tool (same diff as
+the repair above). The hook ran on the repair edit, now over the full suite,
+and passed silently. Then `python -m pytest tests/ -q` gave
+`23 passed in 1.39s`, and `python -m src.features` gave
+`OK features: 714 rows, 15 features`. The raw data's SHA-256 is unchanged
+(`a6bed157...b5ad9dc`).
+
+**Turns to repair: 1.** One Edit, no failed attempts. The hook put the
+failure in front of the agent at the edit, so no hand-run test was needed to
+find it.
 
 ## Correction (2026-11-21): the hand-run hook results
 
@@ -799,3 +856,41 @@ hook's stderr back automatically as a `PostToolUse:Edit hook blocking
 error`, with the same `test_no_forbidden_features` failure recorded in
 Exercise 2 (`1 failed, 8 passed`). The leak was reverted at once, and that
 edit also ran the hook, which passed silently.
+
+
+## Fault 4: Raw data immutability
+
+The PostToolUse hook is not a filesystem-level protection mechanism.
+It only checks certain tool operations, so it cannot guarantee that
+the raw dataset remains unchanged.
+
+Filesystem write permissions could prevent modifications, while a
+SHA-256 checksum test could detect changes regardless of their source.
+
+Dataset integrity was verified using:
+
+    Get-FileHash data/raw/bike_daily.csv -Algorithm SHA256
+
+Result:
+
+    A6BED1577F6E4DE56DCFAE6D8315985073CC0AD3446C8C99ED60C86A0B5AD9DC
+
+The hash matches the prefix specified in the assignment, confirming
+that the original dataset remains intact.
+## Encoding conversion (2026-11-21)
+
+This file is now valid UTF-8. Before, six captured pytest lines held `±` as
+the raw Windows-1252 byte `0xB1`, which is how the Windows console wrote it:
+two in Exercise 3's original test output, two in its hand-run hook output,
+and two in fault 2's rerun test output.
+
+Before the planned conversion ran, the file had already been re-saved as
+UTF-8 by an editor, which turned each of those six bytes into the
+replacement character `�` (U+FFFD). Each was then set to `±`, and **each
+restored line was checked against the original capture file, read as
+Windows-1252, before writing.** All six matched exactly, so no recorded
+number or other character changed.
+
+Apart from mentions in notes like this one, the only `�` left in recorded
+output are the two in fault 2's automatic hook output. They are
+intentional: Claude Code itself displayed that output with `�`.

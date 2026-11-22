@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# PostToolUse hook: re-run the leakage tests whenever src/ changes.
+# PostToolUse hook: re-run the full test suite whenever src/ changes.
+# It runs all of tests/, not just tests/test_leakage.py: a leakage-only run
+# missed a removed weather-label guard (docs/SEEDED_FAULTS.md, fault 3).
 #
 # This runs AFTER the edit has landed, so it cannot prevent the write. What
 # exit 2 does is send stderr back to Claude as a system message, so the
@@ -29,8 +31,8 @@ if ! cd "${CLAUDE_PROJECT_DIR:-.}"; then
   echo "check_leakage hook: cannot cd to project dir '${CLAUDE_PROJECT_DIR:-.}'" >&2
   exit 2
 fi
-if ! out=$(python -m pytest tests/test_leakage.py -q 2>&1); then
-  echo "Leakage tests failed after editing $path:" >&2
+if ! out=$(python -m pytest tests/ -q 2>&1); then
+  echo "Tests failed after editing $path:" >&2
   echo "$out" | tail -20 >&2
   exit 2
 fi
