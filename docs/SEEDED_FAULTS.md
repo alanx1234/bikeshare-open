@@ -259,3 +259,120 @@ verification run, no failed attempts. The test failure named the column
 (`{'casual'}`) and the line, so diagnosis took no extra steps. The fix was
 not prompted by the hook, which is not registered (see above). The failing
 test, run by hand, is what caught the leak.
+
+## Exercise 3: `shift(1)` removed from `cnt_roll_7`
+
+**Purpose:** a deliberately seeded leak. The 7-day rolling mean is made to
+include today's count, the value being predicted.
+
+### Exact change
+
+`src/features.py`, in `build_features()`, made with the Edit tool:
+
+```diff
+-    out["cnt_roll_7"] = out[TARGET].shift(1).rolling(LAG_WARMUP).mean()
++    out["cnt_roll_7"] = out[TARGET].rolling(LAG_WARMUP).mean()  # EXERCISE 3: shift(1) removed
+```
+
+### Why it failed
+
+Without `shift(1)`, `cnt_roll_7` on date d averages d-6 through d, so it
+contains today's `cnt`. That is target leakage. `test_rolling_mean_excludes_today`
+works out the honest mean from d-7 through d-1 (4414.857) and gets 4389.0
+instead. The gap times 7 is today's count minus the count from 7 days ago,
+which is the one value swapped in and the one swapped out.
+
+**It was caught by luck.** The test checks a single row
+(`feats.dteday.iloc[200]`) and wraps its assertion in `if all(...)`. If that
+row's window were incomplete, it would pass without checking anything. No
+other test noticed: the other 16 passed, including the row-count contract.
+
+### Failing test output
+
+Command: `python -m pytest tests/ -q`. Exit code 1. The `ï¿½` is pytest's `Â±`,
+mangled by the Windows console encoding, as captured.
+
+```text
+.........F.......                                                        [100%]
+================================== FAILURES ===================================
+______________________ test_rolling_mean_excludes_today _______________________
+
+feats =         dteday  instant  season  ...  cnt_lag_7   cnt_roll_7    cnt_std_7
+0   2011-01-10     10.0  WINTER  ...     134....428571   886.694316
+713 2012-12-31    731.0  WINTER  ...      920.0  1789.857143   887.135250
+
+[714 rows x 29 columns]
+
+    def test_rolling_mean_excludes_today(feats):
+        """cnt_roll_7 must be the mean of the 7 calendar days *before* today."""
+        by_date = feats.set_index("dteday")[TARGET]
+        date = feats.dteday.iloc[200]
+        window = [date - pd.Timedelta(days=k) for k in range(1, 8)]
+        if all(d in by_date.index for d in window):
+            expected = sum(by_date[d] for d in window) / 7
+>           assert feats.set_index("dteday").cnt_roll_7[date] == pytest.approx(expected)
+E           assert np.float64(4389.0) == 4414.857142857143 ± 0.00441486
+E             
+E             comparison failed
+E             Obtained: 4389.0
+E             Expected: 4414.857142857143 ± 0.00441486
+
+tests\test_leakage.py:57: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_leakage.py::test_rolling_mean_excludes_today - assert np.fl...
+1 failed, 16 passed in 1.63s
+```
+
+### Hook stderr
+
+**The hook again did not fire on its own**, because it is not registered in
+`.claude/settings.json` (see Exercise 2). This came from running
+`check_leakage.sh` by hand with a sample PostToolUse payload for
+`src/features.py`. Exit code 2. It runs `tests/test_leakage.py` only and
+keeps the last 20 lines.
+
+```text
+Leakage tests failed after editing c:/Users/caram/projects/bikeshare-open-starter/src/features.py:
+[714 rows x 29 columns]
+
+    def test_rolling_mean_excludes_today(feats):
+        """cnt_roll_7 must be the mean of the 7 calendar days *before* today."""
+        by_date = feats.set_index("dteday")[TARGET]
+        date = feats.dteday.iloc[200]
+        window = [date - pd.Timedelta(days=k) for k in range(1, 8)]
+        if all(d in by_date.index for d in window):
+            expected = sum(by_date[d] for d in window) / 7
+>           assert feats.set_index("dteday").cnt_roll_7[date] == pytest.approx(expected)
+E           assert np.float64(4389.0) == 4414.857142857143 ± 0.00441486
+E             
+E             comparison failed
+E             Obtained: 4389.0
+E             Expected: 4414.857142857143 ± 0.00441486
+
+tests\test_leakage.py:57: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_leakage.py::test_rolling_mean_excludes_today - assert np.fl...
+1 failed, 8 passed in 0.59s
+```
+
+### Repair
+
+**Fix:** restored `shift(1)`, with the Edit tool:
+
+```diff
+-    out["cnt_roll_7"] = out[TARGET].rolling(LAG_WARMUP).mean()  # EXERCISE 3: shift(1) removed
++    out["cnt_roll_7"] = out[TARGET].shift(1).rolling(LAG_WARMUP).mean()
+```
+
+**Verification:**
+- `python -m pytest tests/ -q`: `17 passed in 1.54s`
+- the hook, run by hand with the same payload: exit code 0, no stderr
+- `python -m src.features`: `OK features: 714 rows, 15 features`
+
+**Turns to repair: 1.** One user turn ("fix the fault"), one Edit, one
+verification run, no failed attempts. As in Exercise 2, the test you ran by
+hand caught the leak, not the hook.
+
+**Not fixed, worth doing:** make `test_rolling_mean_excludes_today` check
+fixed dates and fail if a window is incomplete, as
+`test_rolling_std_excludes_today` does, instead of silently skipping.
