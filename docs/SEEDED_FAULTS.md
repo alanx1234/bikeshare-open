@@ -154,7 +154,7 @@ FAILED tests/test_leakage.py::test_rolling_std_excludes_today[2011-03-18] - A...
 2 failed, 14 passed in 1.82s
 ```
 
-## Exercise 2: `casual` forced into `feature_columns`
+## Exercise 2 (fault 1): `casual` forced into `feature_columns`
 
 **Purpose:** a deliberately seeded leak, to check that the leakage test
 and the `.claude/hooks/check_leakage.sh` hook catch it.
@@ -211,6 +211,10 @@ FAILED tests/test_leakage.py::test_no_forbidden_features - AssertionError: fo...
 
 ### Hook stderr
 
+> **Superseded:** see "Rerun with the hook registered" below for the
+> real automatic output. This hand-run capture used forward-slash paths
+> (see the correction at the end).
+
 **The hook did not fire on its own.** `.claude/settings.json` has
 `permissions` but no `hooks` section, so nothing runs `check_leakage.sh`
 after an edit, and the Edit returned no hook output. The output below came
@@ -263,6 +267,97 @@ verification run, no failed attempts. The test failure named the column
 (`{'casual'}`) and the line, so diagnosis took no extra steps. The fix was
 not prompted by the hook, which is not registered (see above). The failing
 test, run by hand, is what caught the leak.
+
+### Rerun with the hook registered (2026-11-21)
+
+The same fault was repeated after the hook was registered in
+`.claude/settings.json` and fixed for Windows paths, to capture what the
+hook really does during a normal edit.
+
+**Exact change** (`src/features.py`, `feature_columns()`, Edit tool):
+
+```diff
+-    return [c for c in numeric if c not in FORBIDDEN]
++    return [c for c in numeric if c not in FORBIDDEN] + ["casual"]  # SEEDED: leak for hook capture
+```
+
+**Automatic hook output.** Nothing was run by hand. Claude Code ran the
+hook after the Edit and returned this with the Edit result, headed
+`PostToolUse:Edit hook blocking error from command: "bash
+"$CLAUDE_PROJECT_DIR/.claude/hooks/check_leakage.sh""`. It was copied from
+that message, because the hook's output never reaches a file; the text
+matches character for character. The path in the first line has forward
+slashes because the hook now converts the backslashes Claude sends.
+
+```text
+Leakage tests failed after editing c:/Users/caram/projects/bikeshare-open-starter/src/features.py:
+feats =         dteday  instant  season  ...  cnt_lag_7   cnt_roll_7    cnt_std_7
+0   2011-01-10     10.0  WINTER  ...     134....142857   886.694316
+713 2012-12-31    731.0  WINTER  ...      920.0  1531.428571   887.135250
+
+[714 rows x 29 columns]
+
+    def test_no_forbidden_features(feats):
+        """Guards the gate, not the data: feature_columns() excludes FORBIDDEN by
+        construction, so this cannot discover a *new* leaky column. What it
+        catches is someone editing feature_columns() or FORBIDDEN -- which is
+        exactly the fault the Step 7 hook demonstrates."""
+        cols = set(feature_columns(feats))
+>       assert not (cols & FORBIDDEN), f"forbidden columns in feature set: {cols & FORBIDDEN}"
+E       AssertionError: forbidden columns in feature set: {'casual'}
+E       assert not ({'atemp', 'casual', 'cnt_lag_1', 'cnt_lag_7', 'cnt_roll_7', 'cnt_std_7', ...} & {'casual', 'cnt', 'cnt_2d_bfr', 'days_since_2011', 'instant', 'mnth', ...})
+
+tests\test_leakage.py:31: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_leakage.py::test_no_forbidden_features - AssertionError: fo...
+1 failed, 8 passed in 0.68s
+```
+
+**Test failure.** Full suite, `python -m pytest tests/ -q`, exit code 1,
+written directly to a file by the run. The hook says `8 passed` because it
+runs `tests/test_leakage.py` only.
+
+```text
+.......F..........                                                       [100%]
+================================== FAILURES ===================================
+_________________________ test_no_forbidden_features __________________________
+
+feats =         dteday  instant  season  ...  cnt_lag_7   cnt_roll_7    cnt_std_7
+0   2011-01-10     10.0  WINTER  ...     134....142857   886.694316
+713 2012-12-31    731.0  WINTER  ...      920.0  1531.428571   887.135250
+
+[714 rows x 29 columns]
+
+    def test_no_forbidden_features(feats):
+        """Guards the gate, not the data: feature_columns() excludes FORBIDDEN by
+        construction, so this cannot discover a *new* leaky column. What it
+        catches is someone editing feature_columns() or FORBIDDEN -- which is
+        exactly the fault the Step 7 hook demonstrates."""
+        cols = set(feature_columns(feats))
+>       assert not (cols & FORBIDDEN), f"forbidden columns in feature set: {cols & FORBIDDEN}"
+E       AssertionError: forbidden columns in feature set: {'casual'}
+E       assert not ({'atemp', 'casual', 'cnt_lag_1', 'cnt_lag_7', 'cnt_roll_7', 'cnt_std_7', ...} & {'casual', 'cnt', 'cnt_2d_bfr', 'days_since_2011', 'instant', 'mnth', ...})
+
+tests\test_leakage.py:31: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_leakage.py::test_no_forbidden_features - AssertionError: fo...
+1 failed, 17 passed in 1.71s
+```
+
+**Repair:** reverted the one line with the Edit tool:
+
+```diff
+-    return [c for c in numeric if c not in FORBIDDEN] + ["casual"]  # SEEDED: leak for hook capture
++    return [c for c in numeric if c not in FORBIDDEN]
+```
+
+The hook ran automatically on the repair edit too and passed silently (no
+blocking error). Then `python -m pytest tests/ -q` gave `18 passed in 1.43s`,
+and `python -m src.features` gave `OK features: 714 rows, 15 features`.
+
+**Turns to repair: 1.** One user turn ("Repair the fault"), one Edit, no
+failed attempts. This time the hook, not a hand-run test, put the failure in
+front of the agent, at the moment of the edit.
 
 ## Exercise 3: `shift(1)` removed from `cnt_roll_7`
 
