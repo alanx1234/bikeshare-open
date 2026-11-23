@@ -80,8 +80,8 @@ def test_weather_ablation_reports_both_baselines():
 
     raw = load_raw()
     df = build_features(raw)
-    abl = weather_ablation(df, raw)
+    abl = weather_ablation(df, raw, include_test=False)  # pytest never scores test
     res = residual_experiment(df)
+    assert "test_descriptive" not in abl
     for base in ("baseline_mean", "baseline_persistence"):
         assert abl["valid"][base] == res[base]
-        assert base in abl["test_descriptive"]

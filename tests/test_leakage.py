@@ -137,3 +137,40 @@ def test_previous_day_weather_is_missing_after_the_gap():
 
     prev = previous_day_weather(load_raw()).set_index("dteday")
     assert prev.loc[pd.Timestamp("2011-03-11")].isna().all()
+
+
+# Dates whose same-day target is perturbed below: ordinary, leap day, Sandy.
+PERTURB_DATES = ["2011-06-15", "2012-03-01", "2012-10-29"]
+
+
+def _model_inputs(df: pd.DataFrame) -> pd.DataFrame:
+    return df.set_index("dteday")[feature_columns(df)]
+
+
+@pytest.mark.parametrize("date", PERTURB_DATES)
+def test_no_feature_sees_same_day_or_future_cnt(date):
+    """Behavioural leakage check, independent of column NAMES: change cnt on
+    one day and no model input on that day or any earlier day may move.
+    Catches a renamed copy of the target, a lag missing its shift(1), and
+    any feature built from future counts. Lags may legitimately move on
+    later days, so only rows <= date are compared."""
+    raw = load_raw()
+    base = _model_inputs(build_features(raw))
+    bumped = raw.copy()
+    bumped.loc[bumped.dteday == pd.Timestamp(date), TARGET] += 1000
+    moved = _model_inputs(build_features(bumped))
+    upto = base.index <= pd.Timestamp(date)
+    pd.testing.assert_frame_equal(base[upto], moved[upto], check_exact=True,
+                                  obj=f"model inputs on or before {date}")
+
+
+@pytest.mark.parametrize("col", ["casual", "registered"])
+def test_no_feature_depends_on_target_components(col):
+    """casual + registered == cnt, so no model input may depend on either,
+    under any name. Change the column on every day: nothing may move."""
+    raw = load_raw()
+    base = _model_inputs(build_features(raw))
+    bumped = raw.copy()
+    bumped[col] = bumped[col] + 1000
+    pd.testing.assert_frame_equal(base, _model_inputs(build_features(bumped)),
+                                  check_exact=True, obj=f"model inputs after changing {col}")

@@ -22,7 +22,7 @@ needed. Nothing leaves your laptop.
     make model          # pulls the base model, builds `bikeshare-coder` with a 64k context
     make check-model    # confirms Claude Code can reach it and that tool calls work
     make all            # data -> features -> train, writes reports/metrics.json
-    make test           # 32 tests
+    make test           # 37 tests
 
     # 4. Start the agent, from the repo root
     claude
@@ -42,10 +42,11 @@ corrections*). In PowerShell:
     python -m src.ingest                # make data      (checks the raw CSV; never overwrites it without --force)
     python -m src.features              # make features
     python -m src.train                 # make train     (writes reports/metrics.json)
-    python -m pytest tests/ -q          # make test      (32 tests)
+    python -m pytest tests/ -q          # make test      (37 tests)
 
     # Optional experiments: print results, write no files
     python -m src.train --residual-experiment   # Exercise 4, validation only
+    python -m src.train --residual-experiment --final-test   # Exercise 4: the one test look
     python -m src.train --weather-ablation      # Exercise 5, seeded bootstrap
 
 To run without activating, call the interpreter by path, e.g.

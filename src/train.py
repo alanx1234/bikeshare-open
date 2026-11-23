@@ -16,6 +16,8 @@ reason it fails is the headline result.
 Run: python -m src.train
 Optional experiments, which print results and write no files:
   python -m src.train --residual-experiment   (Exercise 4, validation only)
+  python -m src.train --residual-experiment --final-test
+                                              (Exercise 4, the one test look)
   python -m src.train --weather-ablation      (Exercise 5)
 """
 import argparse
@@ -104,7 +106,7 @@ def fit_and_score() -> dict:
 RESIDUAL_BASE = "cnt_lag_1"
 
 
-def residual_experiment(df: pd.DataFrame | None = None) -> dict:
+def residual_experiment(df: pd.DataFrame | None = None, final_test: bool = False) -> dict:
     """Optional, validation-only experiment: train HGB on the day-over-day
     change (cnt - cnt_lag_1) and add cnt_lag_1 back to its predictions.
 
@@ -115,33 +117,37 @@ def residual_experiment(df: pd.DataFrame | None = None) -> dict:
     is yesterday's count, so it is known when today is predicted. Every
     score is on the original count scale.
 
-    The test split is never scored and nothing is written to disk, so
-    reports/metrics.json is untouched.
+    By default the test split is never scored. final_test=True scores the
+    test split INSTEAD of validation: the one end-of-exercise look the
+    assignment allows, run after the decision was recorded on validation.
+    Nothing is written to disk either way, so reports/metrics.json is
+    untouched.
 
-    Run: python -m src.train --residual-experiment
+    Run: python -m src.train --residual-experiment [--final-test]
     """
     if df is None:
         df = pd.read_parquet(PROCESSED)
     cols = feature_columns(df)
     if RESIDUAL_BASE not in cols:
         raise ValueError(f"residual experiment needs feature {RESIDUAL_BASE!r}")
-    train, valid, _ = temporal_split(df)  # test set deliberately unused
+    train, valid, test = temporal_split(df)
+    part, split = (test, "test") if final_test else (valid, "valid")
 
     def score(pred) -> dict:
         return {
-            "r2": round(float(r2_score(valid[TARGET], pred)), 4),
-            "mae": round(float(mean_absolute_error(valid[TARGET], pred)), 1),
+            "r2": round(float(r2_score(part[TARGET], pred)), 4),
+            "mae": round(float(mean_absolute_error(part[TARGET], pred)), 1),
         }
 
-    results = {"split": "valid", "n_train": len(train), "n_valid": len(valid)}
+    results = {"split": split, "n_train": len(train), f"n_{split}": len(part)}
     for name, model in MODELS.items():
         fitted = clone(model).fit(train[cols], train[TARGET])
-        results[name] = score(fitted.predict(valid[cols]))
+        results[name] = score(fitted.predict(part[cols]))
 
     delta = train[TARGET] - train[RESIDUAL_BASE]
     hgb_delta = clone(MODELS["hgb"]).fit(train[cols], delta)
     results["hgb_residual"] = score(
-        hgb_delta.predict(valid[cols]) + valid[RESIDUAL_BASE].to_numpy(dtype=float)
+        hgb_delta.predict(part[cols]) + part[RESIDUAL_BASE].to_numpy(dtype=float)
     )
     return results
 
@@ -163,7 +169,11 @@ def paired_mae_gap(y, pred_a, pred_b) -> dict:
     }
 
 
-def weather_ablation(df: pd.DataFrame | None = None, raw: pd.DataFrame | None = None) -> dict:
+def weather_ablation(
+    df: pd.DataFrame | None = None,
+    raw: pd.DataFrame | None = None,
+    include_test: bool = True,
+) -> dict:
     """Exercise 5: what same-day observed weather is worth to ridge.
 
     Validation (the only basis for any decision): ridge refit three ways --
@@ -176,6 +186,9 @@ def weather_ablation(df: pd.DataFrame | None = None, raw: pd.DataFrame | None = 
     model. Only the default models already scored in reports/metrics.json
     (ridge and both baselines), the same bootstrap, the count of days ridge
     is closer, and Hurricane Sandy.
+
+    include_test=False skips the test block entirely (used by the unit
+    tests, so `pytest` never scores the test split).
 
     Features, split and hyperparameters are unchanged: every model is a
     clone() of MODELS. Prints only; writes no files.
@@ -226,11 +239,24 @@ def weather_ablation(df: pd.DataFrame | None = None, raw: pd.DataFrame | None = 
     valid_res["baseline_mean"] = score(valid[TARGET], mean_baseline.predict(valid[cols]))
 
     ridge = fit("ridge", cols)
+    coefs = pd.Series(ridge[-1].coef_, index=cols)
+    out = {
+        "bootstrap": {"draws": BOOTSTRAP_DRAWS, "seed": BOOTSTRAP_SEED},
+        "same_day_weather_features": weather,
+        "valid": valid_res,
+        "ridge_standardised_coefficients": {
+            c: round(float(v), 1)
+            for c, v in coefs.reindex(coefs.abs().sort_values(ascending=False).index).items()
+        },
+    }
+    if not include_test:
+        return out
+
     ridge_test = ridge.predict(test[cols])
     persist_test = persistence.predict(test[cols])
     y_test = test[TARGET].to_numpy(dtype=float)
     sandy = (test.dteday == pd.Timestamp("2012-10-29")).to_numpy()
-    test_res = {
+    out["test_descriptive"] = {
         "n_test": len(test),
         "ridge": score(y_test, ridge_test),
         "baseline_persistence": score(y_test, persist_test),
@@ -245,17 +271,7 @@ def weather_ablation(df: pd.DataFrame | None = None, raw: pd.DataFrame | None = 
             "baseline_persistence": round(float(persist_test[sandy][0])),
         },
     }
-    coefs = pd.Series(ridge[-1].coef_, index=cols)
-    return {
-        "bootstrap": {"draws": BOOTSTRAP_DRAWS, "seed": BOOTSTRAP_SEED},
-        "same_day_weather_features": weather,
-        "valid": valid_res,
-        "test_descriptive": test_res,
-        "ridge_standardised_coefficients": {
-            c: round(float(v), 1)
-            for c, v in coefs.reindex(coefs.abs().sort_values(ascending=False).index).items()
-        },
-    }
+    return out
 
 
 if __name__ == "__main__":
@@ -264,6 +280,12 @@ if __name__ == "__main__":
         "--residual-experiment",
         action="store_true",
         help="validation only: HGB on cnt - cnt_lag_1; prints, writes nothing",
+    )
+    parser.add_argument(
+        "--final-test",
+        action="store_true",
+        help="with --residual-experiment: score the test split instead of "
+        "validation (the single end-of-exercise test look)",
     )
     parser.add_argument(
         "--weather-ablation",
@@ -284,10 +306,10 @@ if __name__ == "__main__":
             f"(seed {res['bootstrap']['seed']}, {res['bootstrap']['draws']} draws)"
         )
     elif args.residual_experiment:
-        res = residual_experiment()
+        res = residual_experiment(final_test=args.final_test)
         print(json.dumps(res, indent=2))
         print(
-            f"OK residual experiment (valid only): hgb r2 {res['hgb']['r2']} -> "
+            f"OK residual experiment ({res['split']} only): hgb r2 {res['hgb']['r2']} -> "
             f"hgb_residual r2 {res['hgb_residual']['r2']}"
         )
     else:
