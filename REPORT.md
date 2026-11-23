@@ -2,7 +2,7 @@
 
 ## Results
 
-The feature is `cnt_std_7`, the sample standard deviation of `cnt` over days d-7 to d-1. *Before* is the pipeline without it (commit `688ae52`, 14 features). *After* is the current pipeline (15 features), and its rows equal `reports/metrics.json` exactly. Both use the same split (348 train / 182 validation / 184 test days), the same hyperparameters and the versions pinned in `requirements.txt`. The baselines use no features, so they don't change.
+The feature is `cnt_std_7`, the sample standard deviation of `cnt` over days d-7 to d-1. *Before* is the pipeline without it (commit `688ae52`, 14 features). *After* is the current pipeline (15 features) and equals `reports/metrics.json`. Both use the same split (348 / 182 / 184 days), hyperparameters and pinned versions.
 
 | Model | Feature set | Valid R² | Valid MAE | Test R² | Test MAE |
 |---|---|---|---|---|---|
@@ -15,9 +15,9 @@ The feature is `cnt_std_7`, the sample standard deviation of `cnt` over days d-7
 | hgb | before | 0.2185 | 1296.6 | -0.4975 | 1972.6 |
 | hgb | after | 0.0977 | 1381.6 | -0.6959 | 2108.4 |
 
-**Reproducing the table.** Run `make all` for *after*. For *before*, run the same command in a checkout of `688ae52`.
+**Reproducing the table.** Run `make all` for *after*; run it in a checkout of `688ae52` for *before*.
 
-**Test-set use.** The keep decision used validation only, and was recorded with validation numbers in `15b4c2b`. The *after* test scores were visible during the work, because `make train` prints them. The *before* test scores were first computed on 2026-11-22, for this table.
+**Test-set use.** The keep decision used validation only (`15b4c2b`). `make train` printed the *after* test scores during the work, and the *before* test scores were first computed on 2026-11-22, for this table.
 
 ## Headline finding
 
@@ -27,7 +27,7 @@ Adding `cnt_std_7` raised ridge's validation R² from 0.6475 to 0.7224 (MAE 832.
 
 ## Exercise 4: target transformation
 
-**Transformation.** HGB is trained on the day-over-day change `cnt − cnt_lag_1`, and `cnt_lag_1` is added back to its predictions, so scores are on the count scale. Features, split and hyperparameters are unchanged. `cnt_lag_1` is yesterday's count, known before today is predicted, so nothing from day *d* is used. Reproduce with `python -m src.train --residual-experiment`.
+**Transformation.** HGB is trained on `cnt − cnt_lag_1`, and `cnt_lag_1` is added back to its predictions. Features, split and hyperparameters are unchanged. `cnt_lag_1` is yesterday's count, so nothing from day *d* is used. Reproduce with `python -m src.train --residual-experiment`.
 
 | Validation (H1 2012) | R² | MAE |
 |---|---|---|
@@ -37,11 +37,11 @@ Adding `cnt_std_7` raised ridge's validation R² from 0.6475 to 0.7224 (MAE 832.
 | hgb (target `cnt`) | 0.0977 | 1381.6 |
 | hgb_residual (target `cnt − cnt_lag_1`) | 0.5642 | 885.8 |
 
-The transformation substantially improves HGB, from R² 0.0977 → 0.5642 and MAE 1381.6 → 885.8. Once `cnt_lag_1` carries the level, the trees only predict the daily change, which is similar in both years. It still trails ridge by 0.158 R² and 185.4 rides of MAE. Its edge over persistence is small (+0.114 R², 14.8 rides) and may be noise.
+With `cnt_lag_1` carrying the level, the trees only predict the daily change, and HGB improves from R² 0.0977 → 0.5642 and MAE 1381.6 → 885.8. It still trails ridge by 0.158 R² and 185.4 rides. Its edge over persistence (+0.114 R², 14.8 rides) may be noise.
 
 **Decision.** The residual transformation is defensible, because yesterday's demand is available at prediction time. It substantially improves HGB but still underperforms ridge, so the original pipeline is retained unchanged.
 
-**Final test look (once, at the end).** The decision above was committed on validation evidence in `2522ed0`. After that, the test set was scored once with `python -m src.train --residual-experiment --final-test`. Reruns used only to check these numbers gave identical output, and no unit test scores the test split.
+**Final test look (once, after the decision was committed in `2522ed0`).** I ran `python -m src.train --residual-experiment --final-test`; no unit test scores the test split.
 
 | Test (H2 2012) | R² | MAE |
 |---|---|---|
@@ -51,11 +51,11 @@ The transformation substantially improves HGB, from R² 0.0977 → 0.5642 and MA
 | hgb (target `cnt`) | −0.6959 | 2108.4 |
 | hgb_residual (target `cnt − cnt_lag_1`) | 0.4761 | 990.5 |
 
-HGB improves on test too, from R² −0.6959 → 0.4761 and MAE 2108.4 → 990.5. But its small validation edge over persistence does not hold: R² 0.4761 vs 0.5099 and MAE 990.5 vs 840.1. The decision is unchanged.
+HGB improves on test too (R² −0.6959 → 0.4761), but its validation edge over persistence does not hold: R² 0.4761 vs 0.5099 and MAE 990.5 vs 840.1. The decision is unchanged.
 
 ## Exercise 5: ridge vs persistence
 
-The decision uses **validation only**. Test scores are descriptive. Five of ridge's features are weather observed on the day being predicted: `temp`, `atemp`, `hum`, `windspeed` and `weather_severity`. A forecaster working the day before would not have them, and `temp` (363.5) and `weather_severity` (−249.0) are among ridge's four largest standardised coefficients. Ridge was therefore refit without them. Reproduce with `python -m src.train --weather-ablation` (bootstrap seed 0, 5,000 draws).
+The decision uses **validation only**. Five of ridge's features are weather observed on the day being predicted (`temp`, `atemp`, `hum`, `windspeed`, `weather_severity`), which a day-ahead forecaster would not have. `temp` (363.5) and `weather_severity` (−249.0) are among ridge's four largest standardised coefficients, so ridge was refit without them. Reproduce with `python -m src.train --weather-ablation` (seed 0, 5,000 bootstrap draws).
 
 | Validation (H1 2012) | R² | MAE | MAE vs persistence (95% range) |
 |---|---|---|---|
@@ -65,21 +65,16 @@ The decision uses **validation only**. Test scores are descriptive. Five of ridg
 | baseline_persistence | 0.4507 | 900.6 | — |
 | baseline_mean | −0.9318 | 2002.2 | — |
 
-The ranges come from resampling the 182 days; negative means ridge is better.
-- **With same-day weather,** ridge's 200-ride lead is clear.
-- **Using only information available in advance,** its MAE lead is within the noise.
-- **Ridge keeps a higher R² in every variant,** so it still avoids some large misses.
-
-**Tradeoffs.** Persistence needs only yesterday's count, has nothing to fit, and follows the 2011 to 2012 growth automatically. Ridge needs a weather forecast, a 7-day gap-free history, calendar flags, periodic retraining, pinned versions, and leakage tests to keep it honest.
+Negative means ridge is better. Ridge's MAE lead is clear only with same-day weather, but its R² stays higher in every variant. Beyond accuracy, persistence needs only yesterday's count and nothing to fit. Ridge needs a weather forecast, gap-free history, retraining and pinned versions.
 
 **Recommendation (validation only).** I would deploy persistence over ridge for now. On validation, ridge's MAE advantage over persistence is 200.2 rides only when it is given the same day's observed weather. Without it, the advantage is just 6.0 rides (16.4 with the previous day's weather), and both 95% ranges include zero. Ridge keeps a higher validation R² without weather (0.5723–0.5793 vs. 0.4507), so it avoids some large misses. But given that persistence requires only yesterday's demand and no retraining, I don't think ridge's additional complexity is currently justified. However, I would reconsider deploying ridge if reliable weather forecasts were available and further evaluation demonstrated a meaningful improvement.
 
 **Descriptive test results (not used for the decision).**
 - **Scores:** ridge has test R² 0.6356 and MAE 840.3; persistence has 0.5099 and 840.1.
-- **MAE gap:** ridge's MAE minus persistence's is +0.2 rides, 95% range [−118.8, +115.6]. Ridge is closer on 80 of 184 days.
+- **MAE gap:** ridge's MAE minus persistence's is +0.2, 95% range [−118.8, +115.6].
 - **Shocks:** neither model handles them. On Hurricane Sandy (2012-10-29, 22 rides), ridge predicted 4,306 and persistence 4,459.
 
-**Limitation: observed same-day weather.** The five weather features are not leakage: they are not built from `cnt`, and the leakage tests pass. They are measurements of the day being predicted, though, so every ridge and hgb score here, and in `reports/metrics.json`, is a nowcast that assumes the day's weather is known. A real deployment would use forecast weather, whose accuracy falls between the rows above; this dataset has no forecasts to measure it. The default feature set is unchanged, so scores stay comparable. The baselines use no weather.
+**Limitation: observed same-day weather.** The weather features are not leakage, because they are not built from `cnt`. But every ridge and hgb score here is a nowcast that assumes the day's weather is known. A deployment would use forecasts, whose accuracy falls between the rows above. The default features are unchanged, so scores stay comparable.
 
 ## Attribution
 
@@ -89,88 +84,57 @@ The agent is accountable for the code; I am accountable for every claim in this 
 
 ### Generated by the agent
 
-- **`src/features.py`:**
-  - `cnt_std_7` (a1836b4)
-  - `previous_day_weather()` (d85c36f)
+- **`src/features.py`:** `cnt_std_7` (a1836b4) and `previous_day_weather()` (d85c36f).
 - **`src/config.py`:**
   - `RAW_FEATURE_COLS` and `REDUNDANT_CALENDAR_COLS` (688ae52)
-  - `SAME_DAY_WEATHER_FEATURES` and the bootstrap seed (d85c36f)
+  - `SAME_DAY_WEATHER_FEATURES` (d85c36f)
   - `RAW_SHA256` (7602063)
 - **`src/ingest.py`:** `verify_raw()` (7602063).
 - **`src/train.py`:**
   - `residual_experiment()` (2522ed0)
   - `weather_ablation()` and `paired_mae_gap()` (d85c36f)
-  - `--final-test` and `include_test` (7a86749)
+  - `--final-test` (7a86749)
   - `check_pinned_versions()` (dbd24b7)
-- **`tests/test_leakage.py`:**
+- **Tests:**
   - `test_rolling_std_excludes_today`, written before the feature (714a750)
-  - the six-date `test_rolling_mean_excludes_today` (72f6b03)
-  - the previous-day weather tests (d85c36f)
-  - the leakage tests that work under any column name (7a86749)
-- **`tests/test_contract.py`:**
+  - the six-date rolling-mean test (72f6b03)
   - `test_every_raw_column_is_classified` (688ae52)
   - `test_unknown_weather_label_raises` (087d93a)
-  - the validation rewrite of `test_beats_the_mean_baseline` (d85c36f)
+  - the validation-based `test_beats_the_mean_baseline` (d85c36f)
+  - the leakage tests that work under any column name (7a86749)
   - `test_raw_data_is_unchanged` (7602063)
-- **`tests/test_split.py`:** the experiment tests (2522ed0, d85c36f).
-- **Hooks:** `.claude/hooks/check_leakage.sh` and the hook registration in `.claude/settings.json` (fb1f629, 72f6b03).
-- **Skill:** `.claude/skills/validation-summary/SKILL.md` (fd8218b).
-- **Seeded faults:**
-  - the three fault edits and their repairs, with the text of `docs/SEEDED_FAULTS.md` (714a750 to f402ae2)
-  - the fault 4 run in a scratch clone (7602063)
-- **`docs/AUDIT.md`:** the subagent output is verbatim; the framing is agent-written.
-- **Prose:** drafts of this report and README.md, and the wording of the DECISIONS.md lines. The Exercise 4 and 5 decisions and the `cnt_std_7` rationale are in my words, and I edited the rationale by hand in d885671.
+  - the experiment tests (2522ed0, d85c36f)
+- **Hooks:** the hook script fix and its registration (fb1f629, 72f6b03).
+- **Skill:** `validation-summary` (fd8218b).
+- **Docs:**
+  - the seeded-fault edits, repairs and `docs/SEEDED_FAULTS.md` (714a750 to f402ae2, 7602063)
+  - the framing of `docs/AUDIT.md`, whose auditor output is verbatim
+- **Prose:** drafts of this report and README.md, and the wording of the DECISIONS.md lines. The Exercise 4 and 5 decisions and the `cnt_std_7` rationale are in my words (edited by hand in d885671).
 
 ### Decisions that were mine
 
 Each one traces to a line in `docs/DECISIONS.md`.
 
-- **What counts as leakage.**
-  - Keep the starter's exclusions: `casual` and `registered`, `cnt_2d_bfr`, and the time indexes.
-  - Classify every raw column, with `season`, `mnth` and `weekday` as redundant calendar columns, not leakage.
-  - No model input may move when same-day `cnt`, `casual` or `registered` changes.
-
-  *DECISIONS: the three starter "Exclude" lines, 2026-11-21 (688ae52), and "Add behavioural leakage tests".*
-- **How to split.** By date: 2011 / H1 2012 / H2 2012. *DECISIONS: "Split 2011 / H1 2012 / H2 2012" and its correction.*
-- **Which baselines.** Mean and persistence next to every score, with a unit test that requires ridge to beat both on validation. *DECISIONS: "Report mean and persistence baselines" and "`test_beats_the_mean_baseline` now scores validation".*
-- **Whether to keep my feature.** Keep `cnt_std_7`. *DECISIONS: "Keep `cnt_std_7`" and "Kept: …".*
-- **Whether the Exercise 4 transformation is defensible.** It is, but the pipeline stays untransformed, and test was scored once, after the decision. *DECISIONS: "Residual target for HGB" and "Exercise 4 final test look".*
-- **Whether the answer is believable.**
-  - Results come only from the pinned environment.
-  - Weather-based scores are reported as nowcasts.
-  - The deployment choice of persistence rests on validation only.
-
-  *DECISIONS: "Metrics come from the pinned `.venv`", "Keep the five same-day weather observations", and "The Exercise 5 deployment decision".*
-- **Enforcement.**
-  - Run the hook on the full suite.
-  - Add `/validation-summary` to CLAUDE.md.
-  - Track `reports/`.
-  - Catch fault 4 with a raw-data hash check.
-  - Refuse to train outside the pinned versions.
-
-  *DECISIONS: 2026-11-21 (fb1f629, 72f6b03, 087d93a), 2026-11-22 (fd8218b), "Track `reports/metrics.json`", "Fault 4", and "`make train` … refuses to run".*
+- **What counts as leakage:** keep the starter's exclusions. Classify every raw column, with `season`, `mnth` and `weekday` as redundant, not leaky. No input may move when same-day `cnt`, `casual` or `registered` changes. *DECISIONS: the three starter "Exclude" lines, 2026-11-21 (688ae52), and "Add behavioural leakage tests".*
+- **How to split:** by date, 2011 / H1 2012 / H2 2012. *DECISIONS: "Split 2011 / H1 2012 / H2 2012".*
+- **Which baselines:** mean and persistence beside every score, and ridge must beat both on validation. *DECISIONS: "Report mean and persistence baselines" and "`test_beats_the_mean_baseline` now scores validation".*
+- **Whether to keep my feature:** keep `cnt_std_7`. *DECISIONS: "Keep `cnt_std_7`" and "Kept: …".*
+- **Whether the Exercise 4 transformation is defensible:** it is, but the pipeline stays untransformed, with one test look after the decision. *DECISIONS: "Residual target for HGB" and "Exercise 4 final test look".*
+- **Whether the answer is believable:** pinned environment only; weather-based scores reported as nowcasts; deployment decided on validation. *DECISIONS: "Metrics come from the pinned `.venv`", "Keep the five same-day weather observations", and "The Exercise 5 deployment decision".*
+- **Enforcement:** run the hook on the full suite, add `/validation-summary`, track `reports/`, catch fault 4 with a hash check, and refuse to train on unpinned versions. *DECISIONS: 2026-11-21 (fb1f629, 72f6b03, 087d93a), 2026-11-22 (fd8218b), "Track `reports/metrics.json`", "Fault 4", and "`make train` … refuses to run".*
 
 ### Reproducibility and corrections
 
-1. **HGB numbers.** Early HGB numbers came from the system Python (scikit-learn 1.8.0) instead of the pinned `.venv` (1.9.1). HGB drifts across releases; ridge and the baselines matched exactly. Under the pins, the earlier validation figures changed as follows, with no conclusion changed:
+1. **HGB numbers.** Early HGB numbers came from the system Python (scikit-learn 1.8.0), not the pinned 1.9.1: validation hgb 0.0964 / 1382.9 and hgb_residual 0.5714 / 870.6. Under the pins they are 0.0977 / 1381.6 and 0.5642 / 885.8. Ridge and the baselines were identical, and no conclusion changed. `make train` now refuses unpinned versions.
+2. **Test-set access.**
+   - Until 2026-11-22, `test_beats_the_mean_baseline` asserted ridge test R² > 0.4 on every `pytest` run. It never failed and nothing was tuned on it; it now uses validation.
+   - An uncommitted first draft of Exercise 5 cited test scores; the decision now rests on validation.
+3. **`reports/audit.jsonl`.** Earlier `agent/audit.py` runs flagged:
+   - test numbers in Exercise 5
+   - a missing mean baseline
+   - a stale README
+   - uncommitted work
+   - an unpinned interpreter
+   - same-day weather
 
-   | Validation, R² / MAE | Earlier (1.8.0) | Pinned (1.9.1) |
-   |---|---|---|
-   | hgb | 0.0964 / 1382.9 | 0.0977 / 1381.6 |
-   | hgb_residual | 0.5714 / 870.6 | 0.5642 / 885.8 |
-   | hgb before `cnt_std_7` | 0.2368 / 1291 | 0.2185 / 1296.6 |
-2. **The Exercise 5 ablation.** It first ran from an uncommitted script with no seed. It is now `--weather-ablation`, with a fixed seed.
-3. **Test-set access.**
-   - **A gated unit test:** from the starter's first commit until 2026-11-22, `test_beats_the_mean_baseline` asserted ridge **test** R² > 0.4 on every `pytest` run, including every hook run. It never failed, and nothing was tuned on it. It now compares ridge with both baselines on validation.
-   - **The first Exercise 5 draft:** it cited test R² and MAE. That draft was never committed, and the decision now rests on validation.
-4. **`reports/audit.jsonl` (`agent/audit.py`, Claude Opus 5.5).**
-   - **Earlier runs flagged:**
-     - test numbers in the Exercise 5 decision
-     - no mean baseline in the weather ablation
-     - an out-of-date README
-     - uncommitted work
-     - `make all` silently using an unpinned interpreter on PATH
-     - same-day weather
-
-     All of these are fixed above except same-day weather, which is acknowledged as a limitation in Exercise 5. `make train` now exits 1 unless the installed versions match `requirements.txt` (dbd24b7).
-   - **The final run on the finished repository** reports no leakage, a valid temporal split, both baselines and a reproducible pipeline, with no findings.
+   All are fixed except same-day weather, which is acknowledged above. The final run on the finished repository has no findings.
