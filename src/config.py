@@ -64,6 +64,17 @@ RAW_FEATURE_COLS = {
     "holiday", "workday", "weather",
 }
 
+# Same-day observed weather. NOT leakage, and kept in the default feature
+# set, but these are measurements of the day being predicted: a day-ahead
+# forecaster would only have a weather forecast. Scores that use them are
+# nowcast scores. `python -m src.train --weather-ablation` measures what
+# they are worth (REPORT.md, Exercise 5 and Limitations).
+SAME_DAY_WEATHER_FEATURES = ["temp", "atemp", "hum", "windspeed", "weather_severity"]
+
+# Paired bootstrap of the MAE gap in the weather-ablation experiment.
+BOOTSTRAP_DRAWS = 5000
+BOOTSTRAP_SEED = 0
+
 # Temporal split: train on 2011, validate on H1 2012, test on H2 2012.
 TRAIN_END = "2011-12-31"
 VALID_END = "2012-06-30"

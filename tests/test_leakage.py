@@ -107,3 +107,33 @@ def test_no_missing_values(feats):
 def test_dates_are_sorted_and_unique(feats):
     assert feats.dteday.is_monotonic_increasing
     assert feats.dteday.is_unique
+
+
+@pytest.mark.parametrize(
+    "date, source",
+    [
+        ("2011-03-12", "2011-03-11"),  # first day after the missing 2011-03-10 with a real d-1
+        ("2012-03-01", "2012-02-29"),  # leap day
+        ("2011-06-15", "2011-06-14"),
+    ],
+)
+def test_previous_day_weather_is_yesterday(date, source):
+    """Experiment-only feature (weather ablation): the value on d must be
+    the raw observation from d-1 in calendar days, read independently with
+    the csv module."""
+    from src.features import WEATHER_ORDER, previous_day_weather
+
+    with open(RAW, newline="") as fh:
+        rows = {r["dteday"]: r for r in csv.DictReader(fh)}
+    prev = previous_day_weather(load_raw()).set_index("dteday").loc[pd.Timestamp(date)]
+    for col in ["temp", "atemp", "hum", "windspeed"]:
+        assert prev[f"{col}_prev"] == pytest.approx(float(rows[source][col])), f"{date} {col}"
+    assert prev["weather_severity_prev"] == WEATHER_ORDER[rows[source]["weather"]]
+
+
+def test_previous_day_weather_is_missing_after_the_gap():
+    """2011-03-11's yesterday is the absent 2011-03-10: NaN, not 03-09."""
+    from src.features import previous_day_weather
+
+    prev = previous_day_weather(load_raw()).set_index("dteday")
+    assert prev.loc[pd.Timestamp("2011-03-11")].isna().all()

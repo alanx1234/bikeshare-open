@@ -1,6 +1,7 @@
 """Guard rails on the ingest contract and the trained model's behaviour."""
 import pandas as pd
 import pytest
+from sklearn.base import clone
 from sklearn.metrics import r2_score
 
 from src.config import FORBIDDEN, LAG_WARMUP, RAW, RAW_FEATURE_COLS, TARGET
@@ -68,13 +69,21 @@ def test_only_expected_rows_are_dropped(raw, feats):
     assert lost <= allowed_loss, f"lost {lost} rows; expected at most {allowed_loss}"
 
 
-def test_beats_the_mean_baseline(feats):
-    """A model that cannot beat predicting the training mean is not a result."""
+@pytest.mark.parametrize("baseline", ["baseline_mean", "baseline_persistence"])
+def test_beats_the_mean_baseline(feats, baseline):
+    """A model that cannot beat the baselines is not a result.
+
+    Scored on VALIDATION, against baselines fit here, never on test. Until
+    2026-11-22 this test scored ridge on the H2-2012 test split against a
+    fixed R^2 > 0.4 on every run (docs/DECISIONS.md records it). A pass/fail
+    gate on test performance is an invitation to tune on test."""
     cols = feature_columns(feats)
-    train, _, test = temporal_split(feats)
-    ridge = MODELS["ridge"]
-    ridge.fit(train[cols], train[TARGET])
-    assert r2_score(test[TARGET], ridge.predict(test[cols])) > 0.4
+    train, valid, _ = temporal_split(feats)
+    ridge = clone(MODELS["ridge"]).fit(train[cols], train[TARGET])
+    base = clone(MODELS[baseline]).fit(train[cols], train[TARGET])
+    ridge_r2 = r2_score(valid[TARGET], ridge.predict(valid[cols]))
+    base_r2 = r2_score(valid[TARGET], base.predict(valid[cols]))
+    assert ridge_r2 > base_r2, f"ridge valid R^2 {ridge_r2:.4f} <= {baseline} {base_r2:.4f}"
 
 
 def test_persistence_baseline_is_reported():

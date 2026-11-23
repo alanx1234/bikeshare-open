@@ -10,7 +10,7 @@ Run: python -m src.features
 import numpy as np
 import pandas as pd
 
-from src.config import FORBIDDEN, LAG_WARMUP, PROCESSED, TARGET
+from src.config import FORBIDDEN, LAG_WARMUP, PROCESSED, SAME_DAY_WEATHER_FEATURES, TARGET
 from src.ingest import load_raw
 
 WEATHER_ORDER = {"GOOD": 0, "MISTY": 1, "BAD": 2}
@@ -78,6 +78,22 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     out["cnt_std_7"] = out[TARGET].shift(1).rolling(LAG_WARMUP).std()
 
     return out.dropna().reset_index(drop=True)
+
+
+def previous_day_weather(df: pd.DataFrame) -> pd.DataFrame:
+    """Yesterday's observed weather, keyed by dteday. Experiment-only: not
+    part of build_features or the default feature set.
+
+    Built on the gap-free calendar and shifted one calendar day, so the
+    value on d is the observation from d-1 (NaN after a missing day).
+    Returns dteday plus one `<col>_prev` column per same-day weather feature.
+    """
+    cal = reindex_to_calendar(df.sort_values("dteday").reset_index(drop=True)).copy()
+    cal["weather_severity"] = encode_weather(cal.weather)
+    out = cal[["dteday"]].copy()
+    for col in SAME_DAY_WEATHER_FEATURES:
+        out[f"{col}_prev"] = cal[col].shift(1)
+    return out
 
 
 def feature_columns(df: pd.DataFrame) -> list[str]:

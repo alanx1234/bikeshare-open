@@ -22,10 +22,36 @@ needed. Nothing leaves your laptop.
     make model          # pulls the base model, builds `bikeshare-coder` with a 64k context
     make check-model    # confirms Claude Code can reach it and that tool calls work
     make all            # data -> features -> train, writes reports/metrics.json
-    make test           # 14 tests
+    make test           # 32 tests
 
     # 4. Start the agent, from the repo root
     claude
+
+### Windows (no `make`)
+
+`make` is usually not installed on Windows. Each pipeline target is a single
+command, so run them directly. Use the `.venv` interpreter: results are only
+reproducible with the versions pinned in `requirements.txt` (the hgb row
+drifts across scikit-learn releases; see REPORT.md, *Reproducibility and
+corrections*). In PowerShell:
+
+    py -m venv .venv
+    .venv\Scripts\Activate.ps1          # cmd.exe: .venv\Scripts\activate.bat
+    pip install -r requirements.txt
+
+    python -m src.ingest                # make data      (checks the raw CSV; never overwrites it without --force)
+    python -m src.features              # make features
+    python -m src.train                 # make train     (writes reports/metrics.json)
+    python -m pytest tests/ -q          # make test      (32 tests)
+
+    # Optional experiments: print results, write no files
+    python -m src.train --residual-experiment   # Exercise 4, validation only
+    python -m src.train --weather-ablation      # Exercise 5, seeded bootstrap
+
+To run without activating, call the interpreter by path, e.g.
+`.venv\Scripts\python -m src.train`; in Git Bash, `.venv/Scripts/python`.
+`make clean` is `Remove-Item data\processed\*.parquet, reports\metrics.json`.
+`make model` / `make check-model` need Ollama and Git Bash (`bash model/check.sh`).
 
 `.claude/settings.json` points Claude Code at `http://localhost:11434` and
 names the model, so `claude` works with no environment variables. Run
