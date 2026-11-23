@@ -101,6 +101,7 @@ The agent is accountable for the code; I am accountable for every claim in this 
   - `residual_experiment()` (2522ed0)
   - `weather_ablation()` and `paired_mae_gap()` (d85c36f)
   - `--final-test` and `include_test` (7a86749)
+  - `check_pinned_versions()` (dbd24b7)
 - **`tests/test_leakage.py`:**
   - `test_rolling_std_excludes_today`, written before the feature (714a750)
   - the six-date `test_rolling_mean_excludes_today` (72f6b03)
@@ -145,8 +146,9 @@ Each one traces to a line in `docs/DECISIONS.md`.
   - Add `/validation-summary` to CLAUDE.md.
   - Track `reports/`.
   - Catch fault 4 with a raw-data hash check.
+  - Refuse to train outside the pinned versions.
 
-  *DECISIONS: 2026-11-21 (fb1f629, 72f6b03, 087d93a), 2026-11-22 (fd8218b), "Track `reports/metrics.json`", and "Fault 4".*
+  *DECISIONS: 2026-11-21 (fb1f629, 72f6b03, 087d93a), 2026-11-22 (fd8218b), "Track `reports/metrics.json`", "Fault 4", and "`make train` … refuses to run".*
 
 ### Reproducibility and corrections
 
