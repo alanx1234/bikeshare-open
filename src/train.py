@@ -15,10 +15,11 @@ reason it fails is the headline result.
 
 Run: python -m src.train
 """
+import argparse
 import json
 
 import pandas as pd
-from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.base import BaseEstimator, RegressorMixin, clone
 from sklearn.dummy import DummyRegressor
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import Ridge
@@ -86,8 +87,69 @@ def fit_and_score() -> dict:
     return results
 
 
+RESIDUAL_BASE = "cnt_lag_1"
+
+
+def residual_experiment(df: pd.DataFrame | None = None) -> dict:
+    """Optional, validation-only experiment: train HGB on the day-over-day
+    change (cnt - cnt_lag_1) and add cnt_lag_1 back to its predictions.
+
+    Trees cannot predict outside the target range they saw in 2011, and
+    2012 is ~65% busier. Predicting the change instead of the level lets
+    cnt_lag_1 carry the level. Features, split and hyperparameters are the
+    same as fit_and_score(): every model is a clone() of MODELS. cnt_lag_1
+    is yesterday's count, so it is known when today is predicted. Every
+    score is on the original count scale.
+
+    The test split is never scored and nothing is written to disk, so
+    reports/metrics.json is untouched.
+
+    Run: python -m src.train --residual-experiment
+    """
+    if df is None:
+        df = pd.read_parquet(PROCESSED)
+    cols = feature_columns(df)
+    if RESIDUAL_BASE not in cols:
+        raise ValueError(f"residual experiment needs feature {RESIDUAL_BASE!r}")
+    train, valid, _ = temporal_split(df)  # test set deliberately unused
+
+    def score(pred) -> dict:
+        return {
+            "r2": round(float(r2_score(valid[TARGET], pred)), 4),
+            "mae": round(float(mean_absolute_error(valid[TARGET], pred)), 1),
+        }
+
+    results = {"split": "valid", "n_train": len(train), "n_valid": len(valid)}
+    for name, model in MODELS.items():
+        fitted = clone(model).fit(train[cols], train[TARGET])
+        results[name] = score(fitted.predict(valid[cols]))
+
+    delta = train[TARGET] - train[RESIDUAL_BASE]
+    hgb_delta = clone(MODELS["hgb"]).fit(train[cols], delta)
+    results["hgb_residual"] = score(
+        hgb_delta.predict(valid[cols]) + valid[RESIDUAL_BASE].to_numpy(dtype=float)
+    )
+    return results
+
+
 if __name__ == "__main__":
-    res = fit_and_score()
-    METRICS.parent.mkdir(parents=True, exist_ok=True)
-    METRICS.write_text(json.dumps(res, indent=2))
-    print(json.dumps({k: v for k, v in res.items() if k != "features"}, indent=2))
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--residual-experiment",
+        action="store_true",
+        help="validation only: HGB on cnt - cnt_lag_1; prints, writes nothing",
+    )
+    args = parser.parse_args()
+
+    if args.residual_experiment:
+        res = residual_experiment()
+        print(json.dumps(res, indent=2))
+        print(
+            f"OK residual experiment (valid only): hgb r2 {res['hgb']['r2']} -> "
+            f"hgb_residual r2 {res['hgb_residual']['r2']}"
+        )
+    else:
+        res = fit_and_score()
+        METRICS.parent.mkdir(parents=True, exist_ok=True)
+        METRICS.write_text(json.dumps(res, indent=2))
+        print(json.dumps({k: v for k, v in res.items() if k != "features"}, indent=2))
