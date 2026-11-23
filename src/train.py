@@ -37,7 +37,9 @@ from src.config import (
     BOOTSTRAP_DRAWS,
     BOOTSTRAP_SEED,
     METRICS,
+    PINNED_IMPORTS,
     PROCESSED,
+    REQUIREMENTS,
     SAME_DAY_WEATHER_FEATURES,
     TARGET,
     TRAIN_END,
@@ -68,6 +70,28 @@ MODELS = {
     "ridge": make_pipeline(StandardScaler(), Ridge(alpha=1.0)),
     "hgb": HistGradientBoostingRegressor(random_state=0, max_iter=300),
 }
+
+
+def check_pinned_versions() -> None:
+    """Refuse to produce numbers outside the pinned environment.
+
+    `make` calls whatever `python` is on PATH. If that interpreter has a
+    different scikit-learn, hgb scores change with no error, so check
+    every pin in PINNED_IMPORTS before training."""
+    import importlib
+    import re
+
+    pins = dict(re.findall(r"^([A-Za-z0-9_.-]+)==(\S+)", REQUIREMENTS.read_text(), re.M))
+    wrong = []
+    for dist, module in PINNED_IMPORTS.items():
+        have = importlib.import_module(module).__version__
+        if have != pins[dist]:
+            wrong.append(f"{dist} {have} (pinned {pins[dist]})")
+    if wrong:
+        raise SystemExit(
+            "unpinned environment: " + ", ".join(wrong)
+            + ". Activate the venv built from requirements.txt and rerun."
+        )
 
 
 def temporal_split(df: pd.DataFrame):
@@ -294,6 +318,7 @@ if __name__ == "__main__":
         "seeded bootstrap; prints, writes nothing",
     )
     args = parser.parse_args()
+    check_pinned_versions()
 
     if args.weather_ablation:
         res = weather_ablation()
