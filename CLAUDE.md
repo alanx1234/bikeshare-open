@@ -10,6 +10,10 @@ rides) from calendar, weather, and lagged-demand features.
 - `make test` - pytest; run this before claiming anything works
 - `make all` - the three pipeline stages in order
 
+## Skills
+- `/validation-summary <model>` - read-only validation R^2 / MAE for one
+  model vs the mean and persistence baselines. Never scores the test set.
+
 ## Non-negotiable rules
 - **Never** put `casual` or `registered` in a feature set:
   `casual + registered == cnt` exactly. `src/config.py` lists these and the
