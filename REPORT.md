@@ -161,3 +161,14 @@ Each one traces to a line in `docs/DECISIONS.md`.
 3. **Test-set access.**
    - **A gated unit test:** from the starter's first commit until 2026-11-22, `test_beats_the_mean_baseline` asserted ridge **test** R² > 0.4 on every `pytest` run, including every hook run. It never failed, and nothing was tuned on it. It now compares ridge with both baselines on validation.
    - **The first Exercise 5 draft:** it cited test R² and MAE. That draft was never committed, and the decision now rests on validation.
+4. **`reports/audit.jsonl` (`agent/audit.py`, Claude Opus 5.5).**
+   - **Earlier runs flagged:**
+     - test numbers in the Exercise 5 decision
+     - no mean baseline in the weather ablation
+     - an out-of-date README
+     - uncommitted work
+     - `make all` silently using an unpinned interpreter on PATH
+     - same-day weather
+
+     All of these are fixed above except same-day weather, which is acknowledged as a limitation in Exercise 5. `make train` now exits 1 unless the installed versions match `requirements.txt` (dbd24b7).
+   - **The final run on the finished repository** reports no leakage, a valid temporal split, both baselines and a reproducible pipeline, with no findings.
