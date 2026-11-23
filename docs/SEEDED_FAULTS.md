@@ -877,6 +877,142 @@ Result:
 
 The hash matches the prefix specified in the assignment, confirming
 that the original dataset remains intact.
+
+### Seeded run: a `cp` into data/raw/ from Bash (2026-11-22)
+
+**Where it ran.** The fault was seeded in a fresh clone of this repository at commit `9c5ddd4`, in a scratch directory, not in this working copy. When the agent first tried a Bash command that copied the real `data/raw/bike_daily.csv` (to back it up before seeding), the permission prompt was denied, so this working copy's raw file was never touched. Its SHA-256 is still `a6bed1577f6e4de5…`.
+
+**The change.** On 2011-06-15, `temp` was raised from 21.453349 to 26.453349 in a copy of the CSV, and that copy was `cp`'d over `data/raw/bike_daily.csv` from Bash.
+
+**What happened (real output):**
+- **Hook:** the PostToolUse hook did not fire. Its matcher is `Edit|Write|MultiEdit`, and a `cp` runs through the Bash tool.
+- **Permissions:** the deny rules `Write(./data/raw/**)` and `Edit(./data/raw/**)` did not apply, because they bind only those two tools.
+- **Pipeline and tests:** before the hash check, `make data` printed `OK` and all 37 tests passed on the altered data. After it, both fail.
+
+    $ git -C fresh_clone log --oneline -1
+    9c5ddd4 Write the report: Results, Headline finding, Exercises 4-5, Attribution
+    $ cp tampered_bike_daily.csv fresh_clone/data/raw/bike_daily.csv
+    (exit 0)
+    $ git status --short
+     M data/raw/bike_daily.csv
+
+    --- BEFORE the hash check (code at 9c5ddd4) ---
+    $ python -m src.ingest
+    OK ingest: 728 rows, 2011-01-03 -> 2012-12-31
+    $ python -m pytest tests/ -q
+    37 passed in 3.76s
+
+    --- AFTER the hash check (RAW_SHA256 in src/config.py, verify_raw in src/ingest.py, test_raw_data_is_unchanged) ---
+    $ python -m src.ingest      # make data
+    ValueError: bike_daily.csv has changed: sha256 6303d1ffbc5446d0..., expected a6bed1577f6e4de5... Restore it with `git checkout -- data/raw/`.
+    (exit 1)
+    $ python -m pytest tests/ -q
+    E           ValueError: bike_daily.csv has changed: sha256 6303d1ffbc5446d0..., expected a6bed1577f6e4de5... Restore it with `git checkout -- data/raw/`.
+    FAILED tests/test_contract.py::test_raw_data_is_unchanged - ValueError: bike_...
+    1 failed, 37 passed in 4.04s
+
+    --- restore ---
+    $ git checkout -- data/raw/
+    $ python -m src.ingest
+    OK ingest: 728 rows, 2011-01-03 -> 2012-12-31, sha256 a6bed1577f6e4de5
+    $ python -m pytest tests/ -q
+    38 passed in 3.71s
+
+**What would catch it:**
+- **A hash check in `make data` and in the test suite.** Implemented below: it catches any change to the bytes, by any route.
+- **A PreToolUse hook on Bash.** It would block commands that write under `data/raw/` before they run, but matching shell strings is easy to evade (`cp`, `mv`, `python -c`, redirects).
+- **A filesystem permission.** `chmod -w data/raw/` on Unix, or the read-only attribute on Windows, stops writes from every tool, but it can be undone by the same user.
+- **A Stop hook that runs `make test`.** It would surface the hash failure before the agent declares the work done, even though no `src/` edit triggered the PostToolUse hook.
+
+**Implemented: a hash check** (`RAW_SHA256` in `src/config.py`; `verify_raw()` in `src/ingest.py`, called by `make data`; `test_raw_data_is_unchanged`):
+
+    diff --git a/src/config.py b/src/config.py
+    index 60ad42d..eed00f8 100644
+    --- a/src/config.py
+    +++ b/src/config.py
+    @@ -20,6 +20,13 @@ DATA_URL = (
+         "interpretable-ml-book/master/data/bike.csv"
+     )
+     
+    +# SHA-256 of the committed raw CSV. Permission rules only bind Claude's
+    +# Edit/Write tools, and the PostToolUse hook only fires on those, so a `cp`
+    +# from Bash can replace the file unseen. `make data` and
+    +# tests/test_contract.py compare against this hash, so any change to the raw
+    +# bytes, by any route, fails loudly (docs/SEEDED_FAULTS.md, fault 4).
+    +RAW_SHA256 = "a6bed1577f6e4de56dcfae6d8315985073cc0ad3446c8c99ed60c86a0b5ad9dc"
+    +
+     TARGET = "cnt"
+     
+     # --- Four reasons a column is kept out of the feature set ---------------
+    diff --git a/src/ingest.py b/src/ingest.py
+    index 6654075..3d830db 100644
+    --- a/src/ingest.py
+    +++ b/src/ingest.py
+    @@ -2,12 +2,13 @@
+     
+     Run: python -m src.ingest
+     """
+    +import hashlib
+     import sys
+     import urllib.request
+     
+     import pandas as pd
+     
+    -from src.config import DATA_URL, RAW
+    +from src.config import DATA_URL, RAW, RAW_SHA256
+     
+     EXPECTED_MIN_ROWS = 700
+     REQUIRED_COLS = {"dteday", "cnt", "casual", "registered", "temp", "hum", "windspeed"}
+    @@ -20,6 +21,22 @@ def download(force: bool = False) -> None:
+         urllib.request.urlretrieve(DATA_URL, RAW)
+     
+     
+    +def raw_sha256() -> str:
+    +    return hashlib.sha256(RAW.read_bytes()).hexdigest()
+    +
+    +
+    +def verify_raw() -> None:
+    +    """Fail if the raw CSV's bytes differ from the committed file. Catches
+    +    changes the agent's permission rules and PostToolUse hook cannot see,
+    +    such as a `cp` over data/raw/ from Bash."""
+    +    got = raw_sha256()
+    +    if got != RAW_SHA256:
+    +        raise ValueError(
+    +            f"{RAW.name} has changed: sha256 {got[:16]}..., expected "
+    +            f"{RAW_SHA256[:16]}... Restore it with `git checkout -- data/raw/`."
+    +        )
+    +
+    +
+     def load_raw() -> pd.DataFrame:
+         df = pd.read_csv(RAW, parse_dates=["dteday"])
+         missing = REQUIRED_COLS - set(df.columns)
+    @@ -32,5 +49,6 @@ def load_raw() -> pd.DataFrame:
+     
+     if __name__ == "__main__":
+         download(force="--force" in sys.argv)
+    +    verify_raw()
+         df = load_raw()
+    -    print(f"OK ingest: {len(df)} rows, {df.dteday.min().date()} -> {df.dteday.max().date()}")
+    +    print(f"OK ingest: {len(df)} rows, {df.dteday.min().date()} -> {df.dteday.max().date()}, sha256 {raw_sha256()[:16]}")
+    diff --git a/tests/test_contract.py b/tests/test_contract.py
+    index 39f3019..8a6aa74 100644
+    --- a/tests/test_contract.py
+    +++ b/tests/test_contract.py
+    @@ -90,3 +90,13 @@ def test_persistence_baseline_is_reported():
+         """The baseline that matters for a lag-driven model is 'yesterday again'.
+         It must be in the comparison, whatever its score."""
+         assert "baseline_persistence" in MODELS
+    +
+    +
+    +def test_raw_data_is_unchanged():
+    +    """data/raw/bike_daily.csv is immutable. The deny rules bind only the
+    +    Edit/Write tools and the PostToolUse hook only fires on them, so a `cp`
+    +    from Bash would go unseen; this hash check catches any change to the
+    +    bytes, whatever made it (docs/SEEDED_FAULTS.md, fault 4)."""
+    +    from src.ingest import verify_raw
+    +
+    +    verify_raw()
+
 ## Encoding conversion (2026-11-21)
 
 This file is now valid UTF-8. Before, six captured pytest lines held `±` as

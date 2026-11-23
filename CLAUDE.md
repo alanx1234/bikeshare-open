@@ -15,6 +15,9 @@ rides) from calendar, weather, and lagged-demand features.
   model vs the mean and persistence baselines. Never scores the test set.
 
 ## Non-negotiable rules
+- **Never** write to `data/raw/` by any route, Bash included. If
+  `test_raw_data_is_unchanged` fails, restore the file with
+  `git checkout -- data/raw/`; never edit `RAW_SHA256` to make it pass.
 - **Never** put `casual` or `registered` in a feature set:
   `casual + registered == cnt` exactly. `src/config.py` lists these and the
   other excluded columns (`cnt_2d_bfr`, raw time indexes) with the reason

@@ -20,6 +20,13 @@ DATA_URL = (
     "interpretable-ml-book/master/data/bike.csv"
 )
 
+# SHA-256 of the committed raw CSV. Permission rules only bind Claude's
+# Edit/Write tools, and the PostToolUse hook only fires on those, so a `cp`
+# from Bash can replace the file unseen. `make data` and
+# tests/test_contract.py compare against this hash, so any change to the raw
+# bytes, by any route, fails loudly (docs/SEEDED_FAULTS.md, fault 4).
+RAW_SHA256 = "a6bed1577f6e4de56dcfae6d8315985073cc0ad3446c8c99ed60c86a0b5ad9dc"
+
 TARGET = "cnt"
 
 # --- Four reasons a column is kept out of the feature set ---------------

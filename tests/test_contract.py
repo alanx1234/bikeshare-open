@@ -90,3 +90,13 @@ def test_persistence_baseline_is_reported():
     """The baseline that matters for a lag-driven model is 'yesterday again'.
     It must be in the comparison, whatever its score."""
     assert "baseline_persistence" in MODELS
+
+
+def test_raw_data_is_unchanged():
+    """data/raw/bike_daily.csv is immutable. The deny rules bind only the
+    Edit/Write tools and the PostToolUse hook only fires on them, so a `cp`
+    from Bash would go unseen; this hash check catches any change to the
+    bytes, whatever made it (docs/SEEDED_FAULTS.md, fault 4)."""
+    from src.ingest import verify_raw
+
+    verify_raw()

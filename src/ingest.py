@@ -2,12 +2,13 @@
 
 Run: python -m src.ingest
 """
+import hashlib
 import sys
 import urllib.request
 
 import pandas as pd
 
-from src.config import DATA_URL, RAW
+from src.config import DATA_URL, RAW, RAW_SHA256
 
 EXPECTED_MIN_ROWS = 700
 REQUIRED_COLS = {"dteday", "cnt", "casual", "registered", "temp", "hum", "windspeed"}
@@ -18,6 +19,22 @@ def download(force: bool = False) -> None:
         return
     RAW.parent.mkdir(parents=True, exist_ok=True)
     urllib.request.urlretrieve(DATA_URL, RAW)
+
+
+def raw_sha256() -> str:
+    return hashlib.sha256(RAW.read_bytes()).hexdigest()
+
+
+def verify_raw() -> None:
+    """Fail if the raw CSV's bytes differ from the committed file. Catches
+    changes the agent's permission rules and PostToolUse hook cannot see,
+    such as a `cp` over data/raw/ from Bash."""
+    got = raw_sha256()
+    if got != RAW_SHA256:
+        raise ValueError(
+            f"{RAW.name} has changed: sha256 {got[:16]}..., expected "
+            f"{RAW_SHA256[:16]}... Restore it with `git checkout -- data/raw/`."
+        )
 
 
 def load_raw() -> pd.DataFrame:
@@ -32,5 +49,6 @@ def load_raw() -> pd.DataFrame:
 
 if __name__ == "__main__":
     download(force="--force" in sys.argv)
+    verify_raw()
     df = load_raw()
-    print(f"OK ingest: {len(df)} rows, {df.dteday.min().date()} -> {df.dteday.max().date()}")
+    print(f"OK ingest: {len(df)} rows, {df.dteday.min().date()} -> {df.dteday.max().date()}, sha256 {raw_sha256()[:16]}")
