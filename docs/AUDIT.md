@@ -83,4 +83,4 @@ Files reviewed are in `C:\Users\caram\projects\bikeshare-peer\` (`src\`, `tests\
 
 ## My own verdict
 
-I agree with most of these findings. F2 makes a good point that Ridge's advantage might be smaller in a real forecasting setting where observed weather isn't available. F3 does show that there might be concerns about how consistent the evaluation methodology is. I think that F1, F5, and F6 do show some weaknesses in the current test setup, but don't invalidate the current results.
+I agree with most of these findings. F2 makes a good point that Ridge's advantage might be smaller in a real forecasting setting where observed weather isn't available. F3 does show that there might be concerns about how consistent the evaluation methodology is. I think that F1, F5, and F6 do show some weaknesses in the current test setup, but don't invalidate the current results. Only two findings change a number. For F2, Ridge's validation MAE over persistence falls from 137 rides to 25. For F3, DECISIONS.md reports a 0.07 R^2 gap compared to persistence but metrics.json gives 0.117. 
